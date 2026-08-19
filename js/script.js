@@ -15,6 +15,10 @@ const inputMinDistance = document.getElementById('set-distance');
 const inputMaxTime = document.getElementById('set-time');
 const inputMaxSpeed = document.getElementById('set-speed');
 
+const btnWalk = document.getElementById('btn-walk');
+const btnBike = document.getElementById('btn-bike');
+const btnDrive = document.getElementById('btn-drive');
+
 // --- Helper Functions ---
 function getDistance(lat1, lon1, lat2, lon2) {
     const R = 6371e3; // Earth radius in meters
@@ -183,9 +187,19 @@ function generateGPXFile() {
     statusDiv.innerText = "Status: Downloaded!";
 }
 
+function applyPresets(accuracy, distance, time, speed) {
+    inputMaxAccuracy.value = accuracy;
+    inputMinDistance.value = distance;
+    inputMaxTime.value = time;
+    inputMaxSpeed.value = speed;
+}
+
 // --- Event Listeners ---
 startBtn.addEventListener('click', startTracking);
 stopBtn.addEventListener('click', stopTracking);
+btnWalk.addEventListener('click', () => applyPresets(30, 3, 60, 15));
+btnBike.addEventListener('click', () => applyPresets(40, 15, 60, 90));
+btnDrive.addEventListener('click', () => applyPresets(50, 50, 120, 180));
 
 // --- Service Worker Registration (for PWA / Offline support) ---
 if ('serviceWorker' in navigator) {
