@@ -9,12 +9,14 @@
         body { font-family: sans-serif; padding: 20px; text-align: center; }
         button { font-size: 20px; padding: 15px 30px; margin: 10px; cursor: pointer; }
         #status { margin: 20px; font-size: 1.2em; color: #333; }
+        #accuracy { font-size: 0.9em; color: #666; margin-bottom: 20px; }
     </style>
 </head>
 <body>
 
     <h2>Browser GPX Logger</h2>
     <div id="status">Status: Idle</div>
+    <div id="accuracy"></div>
     
     <button id="startBtn" onclick="startTracking()">Start Tracking</button>
     <button id="stopBtn" onclick="stopTracking()" disabled>Stop & Download</button>
@@ -24,13 +26,52 @@
         let trackPoints = [];
         let wakeLock = null;
 
+        // --- 1. Auto-Recover Unsaved Data on Load ---
+        window.onload = () => {
+            const backup = localStorage.getItem('gpx_backup');
+            if (backup) {
+                const recoveredPoints = JSON.parse(backup);
+                if (recoveredPoints.length > 0 && confirm(`Found ${recoveredPoints.length} unsaved points from a previous session. Download them now?`)) {
+                    trackPoints = recoveredPoints;
+                    generateGPXFile();
+                } else {
+                    localStorage.removeItem('gpx_backup');
+                }
+            }
+        };
+
+        // --- 2. Haversine Distance Formula (Meters) ---
+        function getDistance(lat1, lon1, lat2, lon2) {
+            const R = 6371e3; 
+            const rad = Math.PI / 180;
+            const dLat = (lat2 - lat1) * rad;
+            const dLon = (lon2 - lon1) * rad;
+            const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+                      Math.cos(lat1 * rad) * Math.cos(lat2 * rad) *
+                      Math.sin(dLon/2) * Math.sin(dLon/2);
+            return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+        }
+
+        // --- 3. Re-acquire Wake Lock on Tab Switch ---
+        document.addEventListener('visibilitychange', async () => {
+            if (document.visibilityState === 'visible' && watchId !== null) {
+                if ('wakeLock' in navigator && wakeLock === null) {
+                    try {
+                        wakeLock = await navigator.wakeLock.request('screen');
+                    } catch (err) {
+                        console.error(`Failed to re-acquire wake lock: ${err.message}`);
+                    }
+                }
+            }
+        });
+
         async function startTracking() {
             if (!navigator.geolocation) {
                 alert("Geolocation not supported");
                 return;
             }
 
-            // 1. Request Screen Wake Lock
+            // Request Screen Wake Lock
             if ('wakeLock' in navigator) {
                 try {
                     wakeLock = await navigator.wakeLock.request('screen');
@@ -40,19 +81,36 @@
             }
 
             trackPoints = [];
-            document.getElementById('status').innerText = "Status: Tracking...";
+            document.getElementById('status').innerText = "Status: Acquiring GPS lock...";
             document.getElementById('startBtn').disabled = true;
             document.getElementById('stopBtn').disabled = false;
 
             watchId = navigator.geolocation.watchPosition(
                 (pos) => {
-                    trackPoints.push({
+                    document.getElementById('accuracy').innerText = `Current Accuracy: ±${Math.round(pos.coords.accuracy)}m`;
+
+                    // --- Filter: Drop highly inaccurate points ---
+                    if (pos.coords.accuracy > 30) return; 
+
+                    const newPoint = {
                         lat: pos.coords.latitude,
                         lon: pos.coords.longitude,
                         ele: pos.coords.altitude || 0,
                         time: new Date(pos.timestamp).toISOString()
-                    });
-                    document.getElementById('status').innerText = `Logged: ${trackPoints.length} points`;
+                    };
+
+                    // --- Filter: Only log if moved at least 5 meters ---
+                    if (trackPoints.length > 0) {
+                        const lastPoint = trackPoints[trackPoints.length - 1];
+                        const distance = getDistance(lastPoint.lat, lastPoint.lon, newPoint.lat, newPoint.lon);
+                        if (distance < 5) return; 
+                    }
+
+                    trackPoints.push(newPoint);
+                    document.getElementById('status').innerText = `Status: Tracking... (${trackPoints.length} points logged)`;
+                    
+                    // --- Persist data ---
+                    localStorage.setItem('gpx_backup', JSON.stringify(trackPoints));
                 },
                 (err) => alert(`Error: ${err.message}`),
                 { enableHighAccuracy: true, maximumAge: 0, timeout: 10000 }
@@ -60,29 +118,49 @@
         }
 
         function stopTracking() {
-            if (watchId !== null) navigator.geolocation.clearWatch(watchId);
+            if (watchId !== null) {
+                navigator.geolocation.clearWatch(watchId);
+                watchId = null;
+            }
             
-            // 2. Release Wake Lock
+            // Release Wake Lock
             if (wakeLock !== null) wakeLock.release().then(() => wakeLock = null);
 
-            document.getElementById('status').innerText = "Status: Generating...";
+            document.getElementById('status').innerText = "Status: Generating File...";
+            document.getElementById('accuracy').innerText = "";
             document.getElementById('startBtn').disabled = false;
             document.getElementById('stopBtn').disabled = true;
 
             generateGPXFile();
         }
 
+        // --- 4. Optimized File Generation ---
         function generateGPXFile() {
-            let gpx = `<?xml version="1.0" encoding="UTF-8"?><gpx version="1.1" creator="WebGPX"><trk><trkseg>`;
-            trackPoints.forEach(p => {
-                gpx += `<trkpt lat="${p.lat}" lon="${p.lon}"><ele>${p.ele}</ele><time>${p.time}</time></trkpt>`;
-            });
-            gpx += `</trkseg></trk></gpx>`;
+            if (trackPoints.length === 0) {
+                alert("No accurate points were logged.");
+                document.getElementById('status').innerText = "Status: Idle";
+                return;
+            }
+
+            const header = `<?xml version="1.0" encoding="UTF-8"?><gpx version="1.1" creator="WebGPX"><trk><trkseg>\n`;
+            
+            const body = trackPoints.map(p => 
+                `  <trkpt lat="${p.lat}" lon="${p.lon}">\n    <ele>${p.ele.toFixed(1)}</ele>\n    <time>${p.time}</time>\n  </trkpt>`
+            ).join('\n');
+            
+            const footer = `\n</trkseg></trk></gpx>`;
+            
+            const finalGpx = header + body + footer;
 
             const a = document.createElement('a');
-            a.href = URL.createObjectURL(new Blob([gpx], {type: 'application/gpx+xml'}));
+            a.href = URL.createObjectURL(new Blob([finalGpx], {type: 'application/gpx+xml'}));
             a.download = `track_${new Date().toISOString().slice(0,10)}.gpx`;
             a.click();
+            
+            // Clear backup now that file is safely generated
+            localStorage.removeItem('gpx_backup');
+            trackPoints = []; // Reset memory
+            
             document.getElementById('status').innerText = "Status: Downloaded!";
         }
 
