@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GPX Tracker</title>
+    <link rel="manifest" href="manifest.json">
+    <style>
+        body { font-family: sans-serif; padding: 20px; text-align: center; }
+        button { font-size: 20px; padding: 15px 30px; margin: 10px; cursor: pointer; }
+        #status { margin: 20px; font-size: 1.2em; color: #333; }
+    </style>
+</head>
+<body>
+
+    <h2>Browser GPX Logger</h2>
+    <div id="status">Status: Idle</div>
+    
+    <button id="startBtn" onclick="startTracking()">Start Tracking</button>
+    <button id="stopBtn" onclick="stopTracking()" disabled>Stop & Download</button>
+
+    <script>
+        let watchId = null;
+        let trackPoints = [];
+        let wakeLock = null;
+
+        async function startTracking() {
+            if (!navigator.geolocation) {
+                alert("Geolocation not supported");
+                return;
+            }
+
+            // 1. Request Screen Wake Lock
+            if ('wakeLock' in navigator) {
+                try {
+                    wakeLock = await navigator.wakeLock.request('screen');
+                } catch (err) {
+                    console.error(`${err.name}, ${err.message}`);
+                }
+            }
+
+            trackPoints = [];
+            document.getElementById('status').innerText = "Status: Tracking...";
+            document.getElementById('startBtn').disabled = true;
+            document.getElementById('stopBtn').disabled = false;
+
+            watchId = navigator.geolocation.watchPosition(
+                (pos) => {
+                    trackPoints.push({
+                        lat: pos.coords.latitude,
+                        lon: pos.coords.longitude,
+                        ele: pos.coords.altitude || 0,
+                        time: new Date(pos.timestamp).toISOString()
+                    });
+                    document.getElementById('status').innerText = `Logged: ${trackPoints.length} points`;
+                },
+                (err) => alert(`Error: ${err.message}`),
+                { enableHighAccuracy: true, maximumAge: 0, timeout: 10000 }
+            );
+        }
+
+        function stopTracking() {
+            if (watchId !== null) navigator.geolocation.clearWatch(watchId);
+            
+            // 2. Release Wake Lock
+            if (wakeLock !== null) wakeLock.release().then(() => wakeLock = null);
+
+            document.getElementById('status').innerText = "Status: Generating...";
+            document.getElementById('startBtn').disabled = false;
+            document.getElementById('stopBtn').disabled = true;
+
+            generateGPXFile();
+        }
+
+        function generateGPXFile() {
+            let gpx = `<?xml version="1.0" encoding="UTF-8"?><gpx version="1.1" creator="WebGPX"><trk><trkseg>`;
+            trackPoints.forEach(p => {
+                gpx += `<trkpt lat="${p.lat}" lon="${p.lon}"><ele>${p.ele}</ele><time>${p.time}</time></trkpt>`;
+            });
+            gpx += `</trkseg></trk></gpx>`;
+
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(new Blob([gpx], {type: 'application/gpx+xml'}));
+            a.download = `track_${new Date().toISOString().slice(0,10)}.gpx`;
+            a.click();
+            document.getElementById('status').innerText = "Status: Downloaded!";
+        }
+
+        // Register Service Worker
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.register('sw.js');
+        }
+    </script>
+</body>
+</html>
