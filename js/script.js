@@ -204,7 +204,7 @@ btnDrive.addEventListener('click', () => applyPresets(50, 50, 120, 180));
 // --- Service Worker Registration (for PWA / Offline support) ---
 if ('serviceWorker' in navigator) {
     window.addEventListener('load', () => {
-        navigator.serviceWorker.register('../sw.js')
+        navigator.serviceWorker.register('./sw.js')
             .then(registration => {
                 console.log('ServiceWorker registration successful with scope: ', registration.scope);
             })
