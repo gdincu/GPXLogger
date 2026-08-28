@@ -39,5 +39,33 @@
     <button id="stopBtn" disabled>Stop & Download</button>
 
     <script src="js/script.js" defer></script>
+	
+	<button id="lockScreenBtn" style="
+        position: fixed; 
+        bottom: 20px; 
+        left: 50%; 
+        transform: translateX(-50%); 
+        width: 90%; 
+        max-width: 400px; 
+        padding: 15px; 
+        border: none; 
+        border-radius: 8px; 
+        font-weight: bold; 
+        font-size: 16px; 
+        cursor: pointer; 
+        background-color: #ff9800; 
+        color: white; 
+        z-index: 1000; 
+        box-shadow: 0 4px 10px rgba(0,0,0,0.3);">
+        Lock Screen
+    </button>
+	
+	<div id="touchLockOverlay" class="touch-lock-overlay">
+        <div style="font-size: 14px; margin-bottom: 40px; color: #aaa;">Screen Locked</div>
+        
+        <!-- Unlock Slider -->
+        <input type="range" id="unlockSlider" min="0" max="100" value="0" class="unlock-slider">
+        <div style="margin-top: 10px; font-size: 14px; color: #ccc;">Slide right to unlock</div>
+    </div>
 </body>
 </html>

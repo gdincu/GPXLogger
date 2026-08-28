@@ -68,3 +68,43 @@ button {
 .presets button:hover {
     background-color: #d0d0d0;
 }
+
+.touch-lock-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    background: rgba(0, 0, 0, 0.9);
+    z-index: 9999;
+    display: none; /* Hidden by default */
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    color: white;
+    touch-action: pan-y; /* Prevents pull-to-refresh or scrolling */
+}
+
+.unlock-slider {
+    -webkit-appearance: none;
+    width: 80%;
+    max-width: 300px;
+    height: 40px;
+    background: #333;
+    border-radius: 20px;
+    outline: none;
+}
+
+.unlock-slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    background: #007bff;
+    cursor: pointer;
+}
+
+body {
+    padding-bottom: 80px;
+}

@@ -194,6 +194,32 @@ function applyPresets(accuracy, distance, time, speed) {
     inputMaxSpeed.value = speed;
 }
 
+// Screen Lock Logic / Unlock Logic
+const lockScreenBtn = document.getElementById('lockScreenBtn');
+const touchLockOverlay = document.getElementById('touchLockOverlay');
+const unlockSlider = document.getElementById('unlockSlider');
+
+												   
+lockScreenBtn.addEventListener('click', () => {
+    touchLockOverlay.style.display = 'flex';
+    unlockSlider.value = 0; // Reset slider position
+});
+
+// Continuously check the slider value as the user drags it
+unlockSlider.addEventListener('input', (e) => {
+    if (e.target.value >= 95) { // If dragged 95% of the way to the right
+        touchLockOverlay.style.display = 'none'; // Hide overlay
+        e.target.value = 0; // Reset for next time
+    }
+});
+
+																	
+unlockSlider.addEventListener('change', (e) => {
+    if (e.target.value < 95) {
+        e.target.value = 0;
+    }
+});
+
 // --- Event Listeners ---
 startBtn.addEventListener('click', startTracking);
 stopBtn.addEventListener('click', stopTracking);
