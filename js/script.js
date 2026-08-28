@@ -227,6 +227,13 @@ btnWalk.addEventListener('click', () => applyPresets(30, 3, 60, 15));
 btnBike.addEventListener('click', () => applyPresets(40, 15, 60, 90));
 btnDrive.addEventListener('click', () => applyPresets(50, 50, 120, 180));
 
+window.addEventListener('beforeunload', (e) => {
+    if (watchId !== null) {
+        e.preventDefault();
+        e.returnValue = ''; // Standard for modern browsers to trigger the confirmation dialog
+    }
+});
+
 // --- Service Worker Registration (for PWA / Offline support) ---
 if ('serviceWorker' in navigator) {
     window.addEventListener('load', () => {
