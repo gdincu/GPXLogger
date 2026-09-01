@@ -126,25 +126,21 @@ function handlePositionUpdate(pos) {
     const currentAccuracy = pos.coords.accuracy;
     accuracyDiv.innerText = `Current Accuracy: ±${Math.round(currentAccuracy)}m`;
 
-    // 1. If we are ONLY in Pre-Lock mode, show accuracy and exit without processing points
     if (trackingState === 'PRELOCKING') {
         statusDiv.innerText = `Status: GPS Lock Active (±${Math.round(currentAccuracy)}m) - Ready to Start!`;
         return;
     }
 
-    // 2. Read user thresholds
     const maxAcc = parseFloat(inputMaxAccuracy.value) || 30;
     const minDist = parseFloat(inputMinDistance.value) || 5;
     const maxTimeMs = (parseFloat(inputMaxTime.value) || 60) * 1000;
     const maxSpeed = parseFloat(inputMaxSpeed.value) || 30;
 
-    // 3. Hard Accuracy Filter
     if (currentAccuracy > maxAcc) return;
 
     const nowMs = pos.timestamp;
     let isNewSegment = requiresNewSegment;
 
-    // 4. Tunnel / Dropout Detection (> 45 seconds gap)
     if (lastPingTime > 0 && (nowMs - lastPingTime > 45000)) {
         kalmanLat.reset();
         kalmanLon.reset();
@@ -152,19 +148,33 @@ function handlePositionUpdate(pos) {
     }
     lastPingTime = nowMs;
 
-    // 5. Apply Kalman Filter to Lat/Lon
-    const filteredLat = kalmanLat.filter(pos.coords.latitude, currentAccuracy);
-    const filteredLon = kalmanLon.filter(pos.coords.longitude, currentAccuracy);
+    // --- THE FIX: Unit Conversion & Speed Gating ---
+    // 1 degree of latitude is roughly 111,320 meters. We must convert accuracy to degrees for the math to work.
+    const accuracyDeg = currentAccuracy / 111320;
+    const nativeSpeedKmh = (pos.coords.speed || 0) * 3.6;
+    
+    let finalLat, finalLon;
+
+    // If moving faster than 12 km/h (driving/fast cycling), bypass the filter to prevent corner-cutting
+    if (nativeSpeedKmh > 12) {
+        finalLat = pos.coords.latitude;
+        finalLon = pos.coords.longitude;
+        
+        // Force the Kalman state to follow along so it doesn't slingshot when we eventually stop
+        kalmanLat.x = finalLat;
+        kalmanLon.x = finalLon;
+    } else {
+        // If walking or stopped, apply the fixed Kalman filter to eliminate stationary drift
+        finalLat = kalmanLat.filter(pos.coords.latitude, accuracyDeg);
+        finalLon = kalmanLon.filter(pos.coords.longitude, accuracyDeg);
+    }
 
     const now = new Date(pos.timestamp);
     const smoothedEle = getSmoothedElevation(pos.coords.altitude);
-    
-    // Native Doppler Speed in km/h (fallback to 0 if null)
-    const nativeSpeedKmh = (pos.coords.speed || 0) * 3.6;
 
     const newPoint = {
-        lat: filteredLat,
-        lon: filteredLon,
+        lat: finalLat,
+        lon: finalLon,
         ele: smoothedEle,
         time: now.toISOString(),
         timestamp: pos.timestamp, 
@@ -174,44 +184,30 @@ function handlePositionUpdate(pos) {
 
     if (trackPoints.length > 0) {
         const lastPoint = trackPoints[trackPoints.length - 1];
-        
-        // Calculate distance using the FILTERED coordinates
         const distance = getDistance(lastPoint.lat, lastPoint.lon, newPoint.lat, newPoint.lon);
         const timeDiff = newPoint.timestamp - lastPoint.timestamp;
-        
         const calculatedSpeedKmh = (distance / (timeDiff / 1000)) * 3.6;
 
-        // 6. Speed Sanity Check (Drop obvious glitches)
         if (calculatedSpeedKmh > maxSpeed) return;
+        if (pos.coords.speed !== null && nativeSpeedKmh < 1.5) return; 
 
-        // 7. Stationary Drift Filter
-        if (pos.coords.speed !== null && nativeSpeedKmh < 1.5) {
-            return; // Ignored: Native GPS indicates stationary
-        }
-
-        // 8. Signal-to-Noise Ratio & Distance/Time Filter
         const dynamicMinDist = Math.max(minDist, (lastPoint.accuracy + currentAccuracy) * 0.5);
         const movedEnough = distance >= dynamicMinDist;
         const waitedEnough = timeDiff >= maxTimeMs;
 
-        if (!movedEnough && !waitedEnough && !isNewSegment) {
-            return; // Ignored: Didn't move enough outside accuracy radius
-        }
+        if (!movedEnough && !waitedEnough && !isNewSegment) return; 
     }
 
-    // Passed all filters - log the point
-    requiresNewSegment = false; // Reset the flag
+    requiresNewSegment = false; 
     trackPoints.push(newPoint);
     statusDiv.innerText = `Status: Tracking... (${trackPoints.length} points)`;
     
-    // OPTIMIZATION: Only stringify and write to storage every 10 points to save battery/CPU
     if (trackPoints.length % 10 === 0) {
         localStorage.setItem('gpx_backup', JSON.stringify(trackPoints));
     }
 }
 
 // --- Control Functions ---
-
 function lockGps() {
     if (watchId !== null) return; // Already watching
 
@@ -394,11 +390,11 @@ if (pauseBtn) pauseBtn.addEventListener('click', pauseTracking);
 if (stopBtn) stopBtn.addEventListener('click', stopTracking);
 
 // Walk: Erratic movement, quick turns. (q = 0.001)
-if (btnWalk) btnWalk.addEventListener('click', () => applyPresets(30, 3, 60, 15, 0.001));
-// Bike: Faster, smoother curves, less erratic. (q = 0.0001)
-if (btnBike) btnBike.addEventListener('click', () => applyPresets(40, 15, 60, 90, 0.0001));
-// Drive: High speed, straight lines, highly predictable. (q = 0.00001)
-if (btnDrive) btnDrive.addEventListener('click', () => applyPresets(50, 50, 120, 180, 0.00001));
+if (btnWalk) btnWalk.addEventListener('click', () => applyPresets(30, 5, 60, 15, 0.001));
+// Bike: Faster, smoother curves. (q = 0.0005)
+if (btnBike) btnBike.addEventListener('click', () => applyPresets(40, 15, 60, 90, 0.0005));
+// Drive: Filter largely bypassed by speed gate, but fallback value included.
+if (btnDrive) btnDrive.addEventListener('click', () => applyPresets(50, 50, 120, 180, 0.0001));
 
 window.addEventListener('beforeunload', (e) => {
     if (watchId !== null) {
