@@ -5,8 +5,14 @@ let wakeLock = null;
 let rawElevations = []; // Used for moving average smoothing
 let lastPingTime = 0; // Tracks signal dropouts
 
+// Tracking States: 'IDLE' | 'PRELOCKING' | 'TRACKING' | 'PAUSED'
+let trackingState = 'IDLE'; 
+let requiresNewSegment = false; // Set after resume or signal dropouts
+
 // --- DOM Elements ---
+const lockGpsBtn = document.getElementById('lockGpsBtn');
 const startBtn = document.getElementById('startBtn');
+const pauseBtn = document.getElementById('pauseBtn');
 const stopBtn = document.getElementById('stopBtn');
 const statusDiv = document.getElementById('status');
 const accuracyDiv = document.getElementById('accuracy');
@@ -77,6 +83,23 @@ function getSmoothedElevation(newEle) {
     return sum / rawElevations.length;
 }
 
+// --- Wake Lock Helpers ---
+async function requestWakeLock() {
+    if ('wakeLock' in navigator && wakeLock === null) {
+        try {
+            wakeLock = await navigator.wakeLock.request('screen');
+        } catch (err) {
+            console.error("Wake lock failed:", err);
+        }
+    }
+}
+
+function releaseWakeLock() {
+    if (wakeLock !== null) {
+        wakeLock.release().then(() => wakeLock = null);
+    }
+}
+
 // --- Lifecycle Functions ---
 window.onload = () => {
     const backup = localStorage.getItem('gpx_backup');
@@ -92,16 +115,120 @@ window.onload = () => {
 };
 
 document.addEventListener('visibilitychange', async () => {
-    if (document.visibilityState === 'visible' && watchId !== null) {
-        if ('wakeLock' in navigator && wakeLock === null) {
-            try {
-                wakeLock = await navigator.wakeLock.request('screen');
-            } catch (err) {
-                console.error(`Wake lock re-acquire failed: ${err.message}`);
-            }
-        }
+    // Only re-acquire wake lock if we are actively tracking
+    if (document.visibilityState === 'visible' && trackingState === 'TRACKING') {
+        await requestWakeLock();
     }
 });
+
+// --- GPS Watch Handler ---
+function handlePositionUpdate(pos) {
+    const currentAccuracy = pos.coords.accuracy;
+    accuracyDiv.innerText = `Current Accuracy: ±${Math.round(currentAccuracy)}m`;
+
+    // 1. If we are ONLY in Pre-Lock mode, show accuracy and exit without processing points
+    if (trackingState === 'PRELOCKING') {
+        statusDiv.innerText = `Status: GPS Lock Active (±${Math.round(currentAccuracy)}m) - Ready to Start!`;
+        return;
+    }
+
+    // 2. Read user thresholds
+    const maxAcc = parseFloat(inputMaxAccuracy.value) || 30;
+    const minDist = parseFloat(inputMinDistance.value) || 5;
+    const maxTimeMs = (parseFloat(inputMaxTime.value) || 60) * 1000;
+    const maxSpeed = parseFloat(inputMaxSpeed.value) || 30;
+
+    // 3. Hard Accuracy Filter
+    if (currentAccuracy > maxAcc) return;
+
+    const nowMs = pos.timestamp;
+    let isNewSegment = requiresNewSegment;
+
+    // 4. Tunnel / Dropout Detection (> 45 seconds gap)
+    if (lastPingTime > 0 && (nowMs - lastPingTime > 45000)) {
+        kalmanLat.reset();
+        kalmanLon.reset();
+        isNewSegment = true; 
+    }
+    lastPingTime = nowMs;
+
+    // 5. Apply Kalman Filter to Lat/Lon
+    const filteredLat = kalmanLat.filter(pos.coords.latitude, currentAccuracy);
+    const filteredLon = kalmanLon.filter(pos.coords.longitude, currentAccuracy);
+
+    const now = new Date(pos.timestamp);
+    const smoothedEle = getSmoothedElevation(pos.coords.altitude);
+    
+    // Native Doppler Speed in km/h (fallback to 0 if null)
+    const nativeSpeedKmh = (pos.coords.speed || 0) * 3.6;
+
+    const newPoint = {
+        lat: filteredLat,
+        lon: filteredLon,
+        ele: smoothedEle,
+        time: now.toISOString(),
+        timestamp: pos.timestamp, 
+        accuracy: currentAccuracy,
+        isNewSegment: isNewSegment
+    };
+
+    if (trackPoints.length > 0) {
+        const lastPoint = trackPoints[trackPoints.length - 1];
+        
+        // Calculate distance using the FILTERED coordinates
+        const distance = getDistance(lastPoint.lat, lastPoint.lon, newPoint.lat, newPoint.lon);
+        const timeDiff = newPoint.timestamp - lastPoint.timestamp;
+        
+        const calculatedSpeedKmh = (distance / (timeDiff / 1000)) * 3.6;
+
+        // 6. Speed Sanity Check (Drop obvious glitches)
+        if (calculatedSpeedKmh > maxSpeed) return;
+
+        // 7. Stationary Drift Filter
+        if (pos.coords.speed !== null && nativeSpeedKmh < 1.5) {
+            return; // Ignored: Native GPS indicates stationary
+        }
+
+        // 8. Signal-to-Noise Ratio & Distance/Time Filter
+        const dynamicMinDist = Math.max(minDist, (lastPoint.accuracy + currentAccuracy) * 0.5);
+        const movedEnough = distance >= dynamicMinDist;
+        const waitedEnough = timeDiff >= maxTimeMs;
+
+        if (!movedEnough && !waitedEnough && !isNewSegment) {
+            return; // Ignored: Didn't move enough outside accuracy radius
+        }
+    }
+
+    // Passed all filters - log the point
+    requiresNewSegment = false; // Reset the flag
+    trackPoints.push(newPoint);
+    statusDiv.innerText = `Status: Tracking... (${trackPoints.length} points)`;
+    
+    // OPTIMIZATION: Only stringify and write to storage every 10 points to save battery/CPU
+    if (trackPoints.length % 10 === 0) {
+        localStorage.setItem('gpx_backup', JSON.stringify(trackPoints));
+    }
+}
+
+// --- Control Functions ---
+
+function lockGps() {
+    if (watchId !== null) return; // Already watching
+
+    if (!navigator.geolocation) {
+        alert("Geolocation not supported");
+        return;
+    }
+
+    trackingState = 'PRELOCKING';
+    statusDiv.innerText = "Status: Warming up GPS radio...";
+
+    watchId = navigator.geolocation.watchPosition(
+        handlePositionUpdate,
+        (err) => alert(`GPS Error: ${err.message}`),
+        { enableHighAccuracy: true, maximumAge: 0, timeout: 10000 }
+    );
+}
 
 async function startTracking() {
     if (!navigator.geolocation) {
@@ -109,104 +236,55 @@ async function startTracking() {
         return;
     }
 
-    if ('wakeLock' in navigator) {
-        try {
-            wakeLock = await navigator.wakeLock.request('screen');
-        } catch (err) {
-            console.error("Initial wake lock failed:", err);
-        }
+    await requestWakeLock();
+
+    if (trackingState === 'PAUSED') {
+        requiresNewSegment = true; // Break the line from the pause location
+        kalmanLat.reset();
+        kalmanLon.reset();
+    } else {
+        // Fresh start
+        trackPoints = [];
+        rawElevations = [];
+        lastPingTime = 0;
+        requiresNewSegment = false;
+        kalmanLat.reset();
+        kalmanLon.reset();
     }
 
-    trackPoints = [];
-    rawElevations = [];
-    lastPingTime = 0;
-    kalmanLat.reset();
-    kalmanLon.reset();
+    trackingState = 'TRACKING';
+    statusDiv.innerText = "Status: Tracking...";
 
-    statusDiv.innerText = "Status: Acquiring GPS lock...";
-    startBtn.disabled = true;
-    stopBtn.disabled = false;
+    if (startBtn) startBtn.disabled = true;
+    if (pauseBtn) pauseBtn.disabled = false;
+    if (stopBtn) stopBtn.disabled = false;
 
-    watchId = navigator.geolocation.watchPosition(
-        (pos) => {
-            const currentAccuracy = pos.coords.accuracy;
-            accuracyDiv.innerText = `Current Accuracy: ±${Math.round(currentAccuracy)}m`;
+    // Start the watch if it wasn't already started by lockGps()
+    if (watchId === null) {
+        watchId = navigator.geolocation.watchPosition(
+            handlePositionUpdate,
+            (err) => alert(`GPS Error: ${err.message}`),
+            { enableHighAccuracy: true, maximumAge: 0, timeout: 10000 }
+        );
+    }
+}
 
-            // 1. Read user thresholds
-            const maxAcc = parseFloat(inputMaxAccuracy.value) || 30;
-            const minDist = parseFloat(inputMinDistance.value) || 5;
-            const maxTimeMs = (parseFloat(inputMaxTime.value) || 60) * 1000;
-            const maxSpeed = parseFloat(inputMaxSpeed.value) || 30;
+function pauseTracking() {
+    if (watchId !== null) {
+        navigator.geolocation.clearWatch(watchId);
+        watchId = null;
+    }
 
-            // 2. Hard Accuracy Filter
-            if (currentAccuracy > maxAcc) return;
+    releaseWakeLock(); // Let screen turn off to save battery
 
-            const nowMs = pos.timestamp;
-            let isNewSegment = false;
-
-            // 3. Tunnel / Dropout Detection (> 45 seconds gap)
-            if (lastPingTime > 0 && (nowMs - lastPingTime > 45000)) {
-                kalmanLat.reset();
-                kalmanLon.reset();
-                isNewSegment = true; 
-            }
-            lastPingTime = nowMs;
-
-            // 4. Apply Kalman Filter to Lat/Lon
-            const filteredLat = kalmanLat.filter(pos.coords.latitude, currentAccuracy);
-            const filteredLon = kalmanLon.filter(pos.coords.longitude, currentAccuracy);
-
-            const now = new Date(pos.timestamp);
-            const smoothedEle = getSmoothedElevation(pos.coords.altitude);
-            
-            // Native Doppler Speed in km/h (fallback to 0 if null)
-            const nativeSpeedKmh = (pos.coords.speed || 0) * 3.6;
-
-            const newPoint = {
-                lat: filteredLat,
-                lon: filteredLon,
-                ele: smoothedEle,
-                time: now.toISOString(),
-                timestamp: pos.timestamp, 
-                accuracy: currentAccuracy,
-                isNewSegment: isNewSegment
-            };
-
-            if (trackPoints.length > 0) {
-                const lastPoint = trackPoints[trackPoints.length - 1];
-                
-                // Calculate distance using the FILTERED coordinates
-                const distance = getDistance(lastPoint.lat, lastPoint.lon, newPoint.lat, newPoint.lon);
-                const timeDiff = newPoint.timestamp - lastPoint.timestamp;
-                
-                const calculatedSpeedKmh = (distance / (timeDiff / 1000)) * 3.6;
-
-                // 5. Speed Sanity Check (Drop obvious glitches)
-                if (calculatedSpeedKmh > maxSpeed) return;
-
-                // 6. Stationary Drift Filter
-                if (pos.coords.speed !== null && nativeSpeedKmh < 1.5) {
-                    return; // Ignored: Native GPS indicates stationary
-                }
-
-                // 7. Signal-to-Noise Ratio & Distance/Time Filter
-                const dynamicMinDist = Math.max(minDist, (lastPoint.accuracy + currentAccuracy) * 0.5);
-                const movedEnough = distance >= dynamicMinDist;
-                const waitedEnough = timeDiff >= maxTimeMs;
-
-                if (!movedEnough && !waitedEnough && !isNewSegment) {
-                    return; // Ignored: Didn't move enough outside accuracy radius
-                }
-            }
-
-            // Passed all filters - log the point
-            trackPoints.push(newPoint);
-            statusDiv.innerText = `Status: Tracking... (${trackPoints.length} points)`;
-            localStorage.setItem('gpx_backup', JSON.stringify(trackPoints));
-        },
-        (err) => alert(`Error: ${err.message}`),
-        { enableHighAccuracy: true, maximumAge: 0, timeout: 10000 }
-    );
+    trackingState = 'PAUSED';
+    statusDiv.innerText = "Status: Paused (GPS Radio OFF)";
+    
+    if (startBtn) {
+        startBtn.innerText = "Resume Tracking";
+        startBtn.disabled = false;
+    }
+    if (pauseBtn) pauseBtn.disabled = true;
 }
 
 function stopTracking() {
@@ -215,17 +293,28 @@ function stopTracking() {
         watchId = null;
     }
     
-    if (wakeLock !== null) wakeLock.release().then(() => wakeLock = null);
+    releaseWakeLock();
 
     statusDiv.innerText = "Status: Generating File...";
     accuracyDiv.innerText = "";
-    startBtn.disabled = false;
-    stopBtn.disabled = true;
+    
+    if (startBtn) {
+        startBtn.innerText = "Start Tracking";
+        startBtn.disabled = false;
+    }
+    if (pauseBtn) pauseBtn.disabled = true;
+    if (stopBtn) stopBtn.disabled = true;
 
+    trackingState = 'IDLE';
     generateGPXFile();
 }
 
 function generateGPXFile() {
+    // Save any remaining points that didn't hit the modulo 10 check
+    if (trackPoints.length > 0) {
+        localStorage.setItem('gpx_backup', JSON.stringify(trackPoints));
+    }
+
     if (trackPoints.length === 0) {
         alert("No accurate points were logged.");
         statusDiv.innerText = "Status: Idle";
@@ -238,7 +327,7 @@ function generateGPXFile() {
     const body = trackPoints.map((p, index) => {
         let ptXml = `  <trkpt lat="${p.lat}" lon="${p.lon}">\n    <ele>${p.ele.toFixed(1)}</ele>\n    <time>${p.time}</time>\n  </trkpt>`;
         
-        // Break GPX line on tunnel reconnections/dropouts
+        // Break GPX line on tunnel reconnections/dropouts or pauses
         if (p.isNewSegment && index > 0) {
             return `</trkseg>\n<trkseg>\n` + ptXml;
         }
@@ -299,7 +388,9 @@ if (lockScreenBtn && touchLockOverlay && unlockSlider) {
 }
 
 // --- Event Listeners ---
+if (lockGpsBtn) lockGpsBtn.addEventListener('click', lockGps);
 if (startBtn) startBtn.addEventListener('click', startTracking);
+if (pauseBtn) pauseBtn.addEventListener('click', pauseTracking);
 if (stopBtn) stopBtn.addEventListener('click', stopTracking);
 
 // Walk: Erratic movement, quick turns. (q = 0.001)
