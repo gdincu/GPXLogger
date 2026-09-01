@@ -3,6 +3,7 @@ let watchId = null;
 let trackPoints = [];
 let wakeLock = null;
 let rawElevations = []; // Used for moving average smoothing
+let lastPingTime = 0; // Tracks signal dropouts
 
 // --- DOM Elements ---
 const startBtn = document.getElementById('startBtn');
@@ -19,7 +20,44 @@ const btnWalk = document.getElementById('btn-walk');
 const btnBike = document.getElementById('btn-bike');
 const btnDrive = document.getElementById('btn-drive');
 
-// --- Helper Functions ---
+// --- Helper Classes & Functions ---
+class SimpleKalman {
+    constructor(processNoise = 0.001) {
+        this.q = processNoise; // Predictability of movement
+        this.x = null; // State estimate
+        this.p = null; // Estimate error
+    }
+
+    setProcessNoise(newQ) {
+        this.q = newQ;
+    }
+
+    reset() {
+        this.x = null;
+        this.p = null;
+    }
+
+    filter(measurement, accuracy) {
+        if (this.x === null) {
+            this.x = measurement;
+            this.p = accuracy;
+            return this.x;
+        }
+        // Prediction
+        this.p = this.p + this.q;
+        
+        // Update
+        const k = this.p / (this.p + accuracy); // Kalman gain
+        this.x = this.x + k * (measurement - this.x);
+        this.p = (1 - k) * this.p;
+        
+        return this.x;
+    }
+}
+
+const kalmanLat = new SimpleKalman();
+const kalmanLon = new SimpleKalman();
+
 function getDistance(lat1, lon1, lat2, lon2) {
     const R = 6371e3; // Earth radius in meters
     const rad = Math.PI / 180;
@@ -81,6 +119,10 @@ async function startTracking() {
 
     trackPoints = [];
     rawElevations = [];
+    lastPingTime = 0;
+    kalmanLat.reset();
+    kalmanLon.reset();
+
     statusDiv.innerText = "Status: Acquiring GPS lock...";
     startBtn.disabled = true;
     stopBtn.disabled = false;
@@ -96,42 +138,68 @@ async function startTracking() {
             const maxTimeMs = (parseFloat(inputMaxTime.value) || 60) * 1000;
             const maxSpeed = parseFloat(inputMaxSpeed.value) || 30;
 
-            // 2. Accuracy Filter
+            // 2. Hard Accuracy Filter
             if (currentAccuracy > maxAcc) return;
 
+            const nowMs = pos.timestamp;
+            let isNewSegment = false;
+
+            // 3. Tunnel / Dropout Detection (> 45 seconds gap)
+            if (lastPingTime > 0 && (nowMs - lastPingTime > 45000)) {
+                kalmanLat.reset();
+                kalmanLon.reset();
+                isNewSegment = true; 
+            }
+            lastPingTime = nowMs;
+
+            // 4. Apply Kalman Filter to Lat/Lon
+            const filteredLat = kalmanLat.filter(pos.coords.latitude, currentAccuracy);
+            const filteredLon = kalmanLon.filter(pos.coords.longitude, currentAccuracy);
+
             const now = new Date(pos.timestamp);
-            const rawEle = pos.coords.altitude;
-            const smoothedEle = getSmoothedElevation(rawEle);
+            const smoothedEle = getSmoothedElevation(pos.coords.altitude);
+            
+            // Native Doppler Speed in km/h (fallback to 0 if null)
+            const nativeSpeedKmh = (pos.coords.speed || 0) * 3.6;
 
             const newPoint = {
-                lat: pos.coords.latitude,
-                lon: pos.coords.longitude,
+                lat: filteredLat,
+                lon: filteredLon,
                 ele: smoothedEle,
                 time: now.toISOString(),
-                timestamp: pos.timestamp // stored for speed/time math
+                timestamp: pos.timestamp, 
+                accuracy: currentAccuracy,
+                isNewSegment: isNewSegment
             };
 
             if (trackPoints.length > 0) {
                 const lastPoint = trackPoints[trackPoints.length - 1];
+                
+                // Calculate distance using the FILTERED coordinates
                 const distance = getDistance(lastPoint.lat, lastPoint.lon, newPoint.lat, newPoint.lon);
                 const timeDiff = newPoint.timestamp - lastPoint.timestamp;
                 
-                const speedMs = distance / (timeDiff / 1000); // meters per second
-                const speedKmh = speedMs * 3.6; // Convert to km/h
+                const calculatedSpeedKmh = (distance / (timeDiff / 1000)) * 3.6;
 
-                // 3. Speed Sanity Check (Drop obvious glitches)
-                if (speedKmh > maxSpeed) return;
+                // 5. Speed Sanity Check (Drop obvious glitches)
+                if (calculatedSpeedKmh > maxSpeed) return;
 
-                // 4. Distance & Time Based Logging
-                const movedEnough = distance >= minDist;
+                // 6. Stationary Drift Filter
+                if (pos.coords.speed !== null && nativeSpeedKmh < 1.5) {
+                    return; // Ignored: Native GPS indicates stationary
+                }
+
+                // 7. Signal-to-Noise Ratio & Distance/Time Filter
+                const dynamicMinDist = Math.max(minDist, (lastPoint.accuracy + currentAccuracy) * 0.5);
+                const movedEnough = distance >= dynamicMinDist;
                 const waitedEnough = timeDiff >= maxTimeMs;
 
-                if (!movedEnough && !waitedEnough) {
-                    return; // Ignore this point
+                if (!movedEnough && !waitedEnough && !isNewSegment) {
+                    return; // Ignored: Didn't move enough outside accuracy radius
                 }
             }
 
-            // If it passes all tests, log it
+            // Passed all filters - log the point
             trackPoints.push(newPoint);
             statusDiv.innerText = `Status: Tracking... (${trackPoints.length} points)`;
             localStorage.setItem('gpx_backup', JSON.stringify(trackPoints));
@@ -166,10 +234,16 @@ function generateGPXFile() {
 
     const header = `<?xml version="1.0" encoding="UTF-8"?><gpx version="1.1" creator="WebGPX"><trk><trkseg>\n`;
     
-    // Build GPX, mapping altitude to 1 decimal place
-    const body = trackPoints.map(p => 
-        `  <trkpt lat="${p.lat}" lon="${p.lon}">\n    <ele>${p.ele.toFixed(1)}</ele>\n    <time>${p.time}</time>\n  </trkpt>`
-    ).join('\n');
+    // Build GPX, mapping altitude to 1 decimal place and splitting segments on dropouts
+    const body = trackPoints.map((p, index) => {
+        let ptXml = `  <trkpt lat="${p.lat}" lon="${p.lon}">\n    <ele>${p.ele.toFixed(1)}</ele>\n    <time>${p.time}</time>\n  </trkpt>`;
+        
+        // Break GPX line on tunnel reconnections/dropouts
+        if (p.isNewSegment && index > 0) {
+            return `</trkseg>\n<trkseg>\n` + ptXml;
+        }
+        return ptXml;
+    }).join('\n');
     
     const footer = `\n</trkseg></trk></gpx>`;
     
@@ -187,11 +261,15 @@ function generateGPXFile() {
     statusDiv.innerText = "Status: Downloaded!";
 }
 
-function applyPresets(accuracy, distance, time, speed) {
+function applyPresets(accuracy, distance, time, speed, processNoise) {
     inputMaxAccuracy.value = accuracy;
     inputMinDistance.value = distance;
     inputMaxTime.value = time;
     inputMaxSpeed.value = speed;
+
+    // Dynamically adjust how aggressively the filter smooths
+    kalmanLat.setProcessNoise(processNoise);
+    kalmanLon.setProcessNoise(processNoise);
 }
 
 // Screen Lock Logic / Unlock Logic
@@ -199,33 +277,37 @@ const lockScreenBtn = document.getElementById('lockScreenBtn');
 const touchLockOverlay = document.getElementById('touchLockOverlay');
 const unlockSlider = document.getElementById('unlockSlider');
 
-												   
-lockScreenBtn.addEventListener('click', () => {
-    touchLockOverlay.style.display = 'flex';
-    unlockSlider.value = 0; // Reset slider position
-});
+if (lockScreenBtn && touchLockOverlay && unlockSlider) {
+    lockScreenBtn.addEventListener('click', () => {
+        touchLockOverlay.style.display = 'flex';
+        unlockSlider.value = 0; // Reset slider position
+    });
 
-// Continuously check the slider value as the user drags it
-unlockSlider.addEventListener('input', (e) => {
-    if (e.target.value >= 95) { // If dragged 95% of the way to the right
-        touchLockOverlay.style.display = 'none'; // Hide overlay
-        e.target.value = 0; // Reset for next time
-    }
-});
+    // Continuously check the slider value as the user drags it
+    unlockSlider.addEventListener('input', (e) => {
+        if (e.target.value >= 95) { // If dragged 95% of the way to the right
+            touchLockOverlay.style.display = 'none'; // Hide overlay
+            e.target.value = 0; // Reset for next time
+        }
+    });
 
-																	
-unlockSlider.addEventListener('change', (e) => {
-    if (e.target.value < 95) {
-        e.target.value = 0;
-    }
-});
+    unlockSlider.addEventListener('change', (e) => {
+        if (e.target.value < 95) {
+            e.target.value = 0;
+        }
+    });
+}
 
 // --- Event Listeners ---
-startBtn.addEventListener('click', startTracking);
-stopBtn.addEventListener('click', stopTracking);
-btnWalk.addEventListener('click', () => applyPresets(30, 3, 60, 15));
-btnBike.addEventListener('click', () => applyPresets(40, 15, 60, 90));
-btnDrive.addEventListener('click', () => applyPresets(50, 50, 120, 180));
+if (startBtn) startBtn.addEventListener('click', startTracking);
+if (stopBtn) stopBtn.addEventListener('click', stopTracking);
+
+// Walk: Erratic movement, quick turns. (q = 0.001)
+if (btnWalk) btnWalk.addEventListener('click', () => applyPresets(30, 3, 60, 15, 0.001));
+// Bike: Faster, smoother curves, less erratic. (q = 0.0001)
+if (btnBike) btnBike.addEventListener('click', () => applyPresets(40, 15, 60, 90, 0.0001));
+// Drive: High speed, straight lines, highly predictable. (q = 0.00001)
+if (btnDrive) btnDrive.addEventListener('click', () => applyPresets(50, 50, 120, 180, 0.00001));
 
 window.addEventListener('beforeunload', (e) => {
     if (watchId !== null) {
