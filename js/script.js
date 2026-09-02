@@ -8,6 +8,7 @@ let lastPingTime = 0; // Tracks signal dropouts
 // Tracking States: 'IDLE' | 'PRELOCKING' | 'TRACKING' | 'PAUSED'
 let trackingState = 'IDLE'; 
 let requiresNewSegment = false; // Set after resume or signal dropouts
+let isUsingFallback = false;
 
 // --- DOM Elements ---
 const lockGpsBtn = document.getElementById('lockGpsBtn');
@@ -75,6 +76,36 @@ function getDistance(lat1, lon1, lat2, lon2) {
     return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
 }
 
+function handleGpsError(err) {
+    // Error code 3 corresponds to TIMEOUT
+    if (err.code === 3) {
+        console.warn("High-accuracy GPS timed out after 60s. Falling back to lower accuracy.");
+        statusDiv.innerText = "Status: GPS timeout. Retrying with standard accuracy...";
+        
+        // Clear the failed high-accuracy watch
+        if (watchId !== null) {
+            navigator.geolocation.clearWatch(watchId);
+            watchId = null;
+        }
+		
+		isUsingFallback = true;
+
+        // Retry with high accuracy disabled (allows Wi-Fi/cell triangulation)
+        watchId = navigator.geolocation.watchPosition(
+            handlePositionUpdate,
+            (fallbackErr) => {
+                alert(`GPS Error: ${fallbackErr.message}`);
+                statusDiv.innerText = "Status: GPS Error";
+            },
+            { enableHighAccuracy: false, maximumAge: 0, timeout: 30000 }
+        );
+    } else {
+        // Handle other errors (e.g., PERMISSION_DENIED = 1, POSITION_UNAVAILABLE = 2)
+        alert(`GPS Error: ${err.message}`);
+        statusDiv.innerText = `Status: Error (${err.message})`;
+    }
+}
+
 function getSmoothedElevation(newEle) {
     if (newEle === null) return 0;
     rawElevations.push(newEle);
@@ -131,7 +162,7 @@ function handlePositionUpdate(pos) {
         return;
     }
 
-    const maxAcc = parseFloat(inputMaxAccuracy.value) || 30;
+    const maxAcc = isUsingFallback ? 500 : (parseFloat(inputMaxAccuracy.value) || 30);
     const minDist = parseFloat(inputMinDistance.value) || 5;
     const maxTimeMs = (parseFloat(inputMaxTime.value) || 60) * 1000;
     const maxSpeed = parseFloat(inputMaxSpeed.value) || 30;
@@ -221,8 +252,8 @@ function lockGps() {
 
     watchId = navigator.geolocation.watchPosition(
         handlePositionUpdate,
-        (err) => alert(`GPS Error: ${err.message}`),
-        { enableHighAccuracy: true, maximumAge: 0, timeout: 10000 }
+        handleGpsError,
+        { enableHighAccuracy: true, maximumAge: 0, timeout: 60000 }
     );
 }
 
@@ -243,6 +274,7 @@ async function startTracking() {
         trackPoints = [];
         rawElevations = [];
         lastPingTime = 0;
+		isUsingFallback = false;
         requiresNewSegment = false;
         kalmanLat.reset();
         kalmanLon.reset();
@@ -259,8 +291,8 @@ async function startTracking() {
     if (watchId === null) {
         watchId = navigator.geolocation.watchPosition(
             handlePositionUpdate,
-            (err) => alert(`GPS Error: ${err.message}`),
-            { enableHighAccuracy: true, maximumAge: 0, timeout: 10000 }
+            handleGpsError,
+            { enableHighAccuracy: true, maximumAge: 0, timeout: 60000 }
         );
     }
 }
