@@ -3,14 +3,21 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Advanced GPX Tracker</title>
+    <title>GPX Logger</title>
 	<link rel="manifest" href="manifest.json">
     <link rel="stylesheet" href="css/style.css">
 	<link rel="icon" type="image/png" href="icon-192.png">
 </head>
 <body>
 
-    <h2>Advanced GPX Logger</h2>
+	<div id="updateBanner" style="display: none; background: #28a745; color: white; padding: 12px; text-align: center; position: fixed; top: 0; left: 0; right: 0; z-index: 10000; box-shadow: 0 2px 5px rgba(0,0,0,0.3);">
+		New version available! 
+		<button id="updateBtn" style="margin-left: 15px; padding: 6px 12px; background: white; color: #28a745; border: none; border-radius: 4px; font-weight: bold; cursor: pointer;">
+			Refresh App
+		</button>
+	</div>
+
+    <h2>GPX Logger</h2>
     
     <div class="presets">
         <button id="btn-walk">🚶 Walk</button>
@@ -35,7 +42,7 @@
     <div id="status">Status: Idle</div>
     <div id="accuracy"></div>
     
-    <button id="lockGpsBtn">📡 Lock GPS Signal</button>
+    <button id="lockGpsBtn">Lock GPS Signal</button>
 
 	<div class="controls">
 		<button id="startBtn">Start Tracking</button>
@@ -66,11 +73,8 @@
     </button>
 	
 	<div id="touchLockOverlay" class="touch-lock-overlay">
-        <div style="font-size: 14px; color: #aaa;">Screen Locked</div>
-        
-        <!-- Unlock Slider -->
         <input type="range" id="unlockSlider" min="0" max="100" value="0" class="unlock-slider">
-        <div style="font-size: 12px; color: #ccc;">Slide right to unlock</div>
+        <div style="font-size: 12px; color: #ccc;">Slide to unlock</div>
     </div>
 </body>
 </html>

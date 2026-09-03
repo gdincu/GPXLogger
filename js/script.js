@@ -437,9 +437,9 @@ if (stopBtn) stopBtn.addEventListener('click', stopTracking);
 // Walk: Erratic movement, quick turns. (q = 0.001)
 if (btnWalk) btnWalk.addEventListener('click', () => applyPresets(30, 5, 60, 15, 0.001));
 // Bike: Faster, smoother curves. (q = 0.0005)
-if (btnBike) btnBike.addEventListener('click', () => applyPresets(40, 15, 60, 90, 0.0005));
+if (btnBike) btnBike.addEventListener('click', () => applyPresets(40, 5, 60, 90, 0.0005));
 // Drive: Filter largely bypassed by speed gate, but fallback value included.
-if (btnDrive) btnDrive.addEventListener('click', () => applyPresets(50, 50, 120, 180, 0.0001));
+if (btnDrive) btnDrive.addEventListener('click', () => applyPresets(50, 15, 120, 180, 0.0001));
 
 window.addEventListener('beforeunload', (e) => {
     if (watchId !== null) {
@@ -450,13 +450,44 @@ window.addEventListener('beforeunload', (e) => {
 
 // --- Service Worker Registration (for PWA / Offline support) ---
 if ('serviceWorker' in navigator) {
+    let newWorker;
+    const updateBanner = document.getElementById('updateBanner');
+    const updateBtn = document.getElementById('updateBtn');
+
     window.addEventListener('load', () => {
         navigator.serviceWorker.register('./sw.js')
-            .then(registration => {
-                console.log('ServiceWorker registration successful with scope: ', registration.scope);
+            .then(reg => {
+                console.log('ServiceWorker registered:', reg.scope);
+                
+                // Check for updates whenever the page loads
+                reg.addEventListener('updatefound', () => {
+                    newWorker = reg.installing;
+                    newWorker.addEventListener('statechange', () => {
+                        // If the new worker is ready AND an old worker exists, show the prompt
+                        if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+                            updateBanner.style.display = 'block';
+                        }
+                    });
+                });
             })
-            .catch(err => {
-                console.error('ServiceWorker registration failed: ', err);
+            .catch(err => console.error('ServiceWorker registration failed: ', err));
+
+        // When the user clicks update, tell the waiting Service Worker to take over
+        if (updateBtn) {
+            updateBtn.addEventListener('click', () => {
+                if (newWorker) {
+                    newWorker.postMessage('SKIP_WAITING');
+                }
             });
+        }
+
+        // Listen for the controlling Service Worker to change, then reload the page
+        let refreshing = false;
+        navigator.serviceWorker.addEventListener('controllerchange', () => {
+            if (!refreshing) {
+                window.location.reload();
+                refreshing = true;
+            }
+        });
     });
 }

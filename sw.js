@@ -1,4 +1,4 @@
-const CACHE_NAME = 'gpx-tracker-v2';
+const CACHE_NAME = 'gpx-tracker-v3';
 const ASSETS = [
 './index.html', 
 './manifest.json',
@@ -13,7 +13,12 @@ self.addEventListener('install', (e) => {
       return cache.addAll(ASSETS);
     })
   );
-  self.skipWaiting();
+});
+
+self.addEventListener('message', (event) => {
+  if (event.data === 'SKIP_WAITING') {
+    self.skipWaiting();
+  }
 });
 
 self.addEventListener('activate', (e) => {
@@ -33,20 +38,26 @@ self.addEventListener('activate', (e) => {
 
 // Runtime caching (Cache-First with Network Fallback & Dynamic Saving)
 self.addEventListener('fetch', (e) => {
-  e.respondWith(
-    caches.match(e.request).then((cachedRes) => {
-      if (cachedRes) {
-        return cachedRes;
-      }
-      return fetch(e.request).then((networkRes) => {
-        // Dynamically cache any new successful requests (like icons or chunks)
-        return caches.open(CACHE_NAME).then((cache) => {
-          cache.put(e.request, networkRes.clone());
-          return networkRes;
-        });
-      }).catch(() => {
-        // Optional: Return a fallback offline page if both cache and network fail
-      });
-    })
-  );
+	if (!e.request.url.startsWith('http')) return;
+	
+	e.respondWith(
+		caches.match(e.request).then((cachedRes) => {
+		if (cachedRes) {
+			return cachedRes;
+		}
+		return fetch(e.request).then((networkRes) => {
+			if (!networkRes || networkRes.status !== 200 || networkRes.type !== 'basic') {
+				return networkRes;
+			}
+			
+			// Dynamically cache any new successful requests (like icons or chunks)
+			return caches.open(CACHE_NAME).then((cache) => {
+			cache.put(e.request, networkRes.clone());
+			return networkRes;
+			});
+		}).catch(() => {
+			console.warn('Network request failed and no cache available for:', e.request.url);
+		});
+		})
+	);
 });
