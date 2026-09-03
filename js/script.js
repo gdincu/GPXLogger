@@ -4,6 +4,7 @@ let trackPoints = [];
 let wakeLock = null;
 let rawElevations = []; // Used for moving average smoothing
 let lastPingTime = 0; // Tracks signal dropouts
+let isScreenLocked = false;
 
 // Tracking States: 'IDLE' | 'PRELOCKING' | 'TRACKING' | 'PAUSED'
 let trackingState = 'IDLE'; 
@@ -155,7 +156,10 @@ document.addEventListener('visibilitychange', async () => {
 // --- GPS Watch Handler ---
 function handlePositionUpdate(pos) {
     const currentAccuracy = pos.coords.accuracy;
+	
+	if (!isScreenLocked) {
     accuracyDiv.innerText = `Current Accuracy: ±${Math.round(currentAccuracy)}m`;
+	}
 
     if (trackingState === 'PRELOCKING') {
         statusDiv.innerText = `Status: GPS Lock Active (±${Math.round(currentAccuracy)}m) - Ready to Start!`;
@@ -231,7 +235,9 @@ function handlePositionUpdate(pos) {
 
     requiresNewSegment = false; 
     trackPoints.push(newPoint);
+	if (!isScreenLocked) {
     statusDiv.innerText = `Status: Tracking... (${trackPoints.length} points)`;
+	}
     
     if (trackPoints.length % 10 === 0) {
         localStorage.setItem('gpx_backup', JSON.stringify(trackPoints));
@@ -398,13 +404,20 @@ if (lockScreenBtn && touchLockOverlay && unlockSlider) {
     lockScreenBtn.addEventListener('click', () => {
         touchLockOverlay.style.display = 'flex';
         unlockSlider.value = 0; // Reset slider position
+		isScreenLocked = true;
     });
 
     // Continuously check the slider value as the user drags it
     unlockSlider.addEventListener('input', (e) => {
-        if (e.target.value >= 95) { // If dragged 95% of the way to the right
-            touchLockOverlay.style.display = 'none'; // Hide overlay
-            e.target.value = 0; // Reset for next time
+        if (e.target.value >= 95) { 
+            touchLockOverlay.style.display = 'none'; 
+            e.target.value = 0; 
+            isScreenLocked = false; // RESUME DOM UPDATES
+            
+            // Immediately update UI upon unlocking so it isn't blank/stale
+            if (trackingState === 'TRACKING') {
+                statusDiv.innerText = `Status: Tracking... (${trackPoints.length} points)`;
+            }
         }
     });
 

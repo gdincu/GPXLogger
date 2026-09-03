@@ -76,24 +76,26 @@ button {
     left: 0;
     width: 100vw;
     height: 100vh;
-    background: rgba(0, 0, 0, 0.9);
+    background: #000000;
     z-index: 9999;
     display: none; /* Hidden by default */
     flex-direction: column;
-    justify-content: center;
+    justify-content: flex-start;
     align-items: center;
     color: white;
     touch-action: pan-y; /* Prevents pull-to-refresh or scrolling */
+	padding-top: 60px;
 }
 
 .unlock-slider {
     -webkit-appearance: none;
     width: 80%;
-    max-width: 300px;
+	max-width: 300px;
     height: 40px;
     background: #333;
     border-radius: 20px;
     outline: none;
+	margin: 10px 0;
 }
 
 .unlock-slider::-webkit-slider-thumb {
