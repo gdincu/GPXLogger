@@ -2,6 +2,10 @@
 
 A highly optimized, battery-efficient Progressive Web App (PWA) that logs your GPS location and generates a downloadable `.gpx` file directly in your browser. All processing happens locally on your device—no data is ever sent to a server.
 
+<img width="303.75" height="675" alt="input1" src="https://github.com/user-attachments/assets/a89f6545-113f-48b8-8be5-9f612e4044c6" />
+<img width="303.75" height="675" alt="input2" src="https://github.com/user-attachments/assets/41119551-d86a-485f-b981-1c7b17c03ef8" />
+<img width="303.75" height="675" alt="input3" src="https://github.com/user-attachments/assets/6d5faa46-6b91-4096-8b67-d093adc6042e" />
+
 ## Features
 
 *   **100% Client-Side & Offline:** No backend, no accounts. Installs directly to your home screen (PWA) and works completely offline.
