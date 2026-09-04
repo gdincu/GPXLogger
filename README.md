@@ -4,7 +4,6 @@ A highly optimized, battery-efficient Progressive Web App (PWA) that logs your G
 
 <img width="303.75" height="675" alt="input1" src="https://github.com/user-attachments/assets/a89f6545-113f-48b8-8be5-9f612e4044c6" />
 <img width="303.75" height="675" alt="input2" src="https://github.com/user-attachments/assets/41119551-d86a-485f-b981-1c7b17c03ef8" />
-<img width="303.75" height="675" alt="input3" src="https://github.com/user-attachments/assets/6d5faa46-6b91-4096-8b67-d093adc6042e" />
 
 ## Features
 
