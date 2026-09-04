@@ -33,4 +33,4 @@ Because this is a web application, mobile operating systems (iOS and Android) wi
 **To ensure continuous, battery-friendly tracking:**
 *   **Do not press your phone's physical power button.** 
 *   Instead, tap the in-app **Lock Screen** button at the bottom of the page. 
-*   This triggers the built-in Wake Lock API to prevent the phone from sleeping, while covering the screen in pure black to turn off OLED pixels and freeze UI repaints. You can then safely place the phone in your pocket.
+*   This triggers the built-in Wake Lock API to prevent the phone from sleeping, while covering the screen in pure black to turn off OLED pixels and freeze UI repaints. You can then safely place the phone in your pocket. 
