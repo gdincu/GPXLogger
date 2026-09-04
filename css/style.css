@@ -1,113 +1,246 @@
-body { 
-    font-family: sans-serif; 
-    padding: 20px; 
-    max-width: 600px; 
-    margin: 0 auto; 
-    text-align: center; 
-	overscroll-behavior-y: contain;
+/* Color Variables */
+:root {
+  --primary-color: #2563eb;
+  --bg-color: #f8fafc;
+  --card-bg: #ffffff;
+  --text-main: #0f172a;
+  --text-muted: #64748b;
+  --border-color: #e2e8f0;
 }
 
-button { 
-    font-size: 18px; 
-    padding: 12px 24px; 
-    margin: 10px; 
-    cursor: pointer; 
+/* Base Body Styles */
+body { 
+  font-family: system-ui, -apple-system, sans-serif; 
+  padding: 20px 20px 80px 20px; 
+  max-width: 600px; 
+  margin: 0 auto; 
+  text-align: center; 
+  overscroll-behavior-y: contain;
+  background-color: var(--bg-color);
+}
+
+/* Card Layout Container */
+.tracker-card {
+  background: var(--card-bg);
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  padding: 1.5rem;
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+  margin-bottom: 20px;
+}
+
+/* Status & Accuracy Badge */
+.status-badge {
+  background-color: #f1f5f9;
+  border-radius: 8px;
+  padding: 1rem;
+  text-align: center;
 }
 
 #status { 
-    margin: 15px; 
-    font-size: 1.2em; 
-    font-weight: bold; 
-    color: #333; 
+  margin: 0; 
+  font-size: 1.1em; 
+  font-weight: 600; 
+  color: var(--text-main); 
 }
 
 #accuracy { 
-    font-size: 0.9em; 
-    color: #666; 
-    margin-bottom: 20px; 
+  font-size: 0.875rem; 
+  color: var(--text-muted); 
+  margin-top: 0.25rem;
+  margin-bottom: 0;
 }
 
-.settings-panel { 
-    background: #f4f4f4; 
-    padding: 15px; 
-    border-radius: 8px; 
-    text-align: left; 
-    margin-bottom: 20px; 
+/* Layout Containers */
+#lockGpsBtn {
+  width: 100%;
 }
 
-.settings-panel label { 
-    display: block; 
-    margin: 10px 0 5px; 
-    font-size: 0.9em; 
-    font-weight: bold; 
+.controls, .presets {
+  display: flex;
+  gap: 0.5rem;
+  width: 100%;
+  margin-bottom: 15px;
 }
 
-.settings-panel input { 
-    width: 100%; 
-    padding: 8px; 
-    box-sizing: border-box; 
+.controls button, .presets button {
+  flex: 1;
 }
 
-.presets { 
-    display: flex; 
-    justify-content: center; 
-    gap: 10px; 
-    margin-bottom: 15px; 
+/* Global Button System */
+button { 
+  font-size: 0.875rem; 
+  padding: 0.625rem 1rem; 
+  font-weight: 500;
+  margin: 0; 
+  cursor: pointer; 
+  border: none;
+  border-radius: 6px;
+  transition: all 0.2s ease;
 }
 
-.presets button { 
-    font-size: 16px; 
-    padding: 10px; 
-    margin: 0; 
-    flex: 1; 
-    background-color: #e0e0e0;
-    border: 1px solid #ccc;
-    border-radius: 5px;
-    color: #333;
+/* Button Color Variants */
+.btn-secondary, #lockGpsBtn, .presets button {
+  background-color: #e2e8f0;
+  color: var(--text-main);
 }
 
-.presets button:hover {
-    background-color: #d0d0d0;
+.btn-secondary:not(:disabled):hover, 
+#lockGpsBtn:not(:disabled):hover, 
+.presets button:not(:disabled):hover {
+  background-color: #cbd5e1;
 }
 
+.btn-primary, #startBtn {
+  background-color: var(--primary-color);
+  color: white;
+}
+
+.btn-primary:not(:disabled):hover, 
+#startBtn:not(:disabled):hover {
+  background-color: #1d4ed8;
+}
+
+.btn-warning, #pauseBtn {
+  background-color: #f59e0b;
+  color: white;
+}
+
+.btn-danger, #stopBtn {
+  background-color: #ef4444;
+  color: white;
+}
+
+button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  filter: grayscale(80%);
+}
+
+/* Settings Card */
+.settings-card {
+  background: var(--card-bg);
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  padding: 1rem;
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
+  margin-bottom: 20px;
+  text-align: left;
+}
+
+.settings-header {
+  font-weight: 600;
+  font-size: 0.95rem;
+  color: var(--text-main);
+  cursor: pointer;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  list-style: none;
+  user-select: none;
+}
+
+.settings-header::-webkit-details-marker {
+  display: none;
+}
+
+.settings-header .chevron {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  transition: transform 0.2s ease;
+}
+
+.settings-card[open] .chevron {
+  transform: rotate(180deg);
+}
+
+.settings-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 0.75rem 1rem;
+  margin-top: 1rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--border-color);
+}
+
+.setting-item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.setting-item label {
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: var(--text-muted);
+  cursor: help;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.setting-item input {
+  width: 100%;
+  padding: 0.4rem 0.6rem;
+  font-size: 0.875rem;
+  color: var(--text-main);
+  background-color: var(--bg-color);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  box-sizing: border-box;
+  outline: none;
+  transition: border-color 0.2s ease;
+}
+
+.setting-item input:focus {
+  border-color: var(--primary-color);
+}
+
+/* Touch Lock Overlay */
 .touch-lock-overlay {
-    position: fixed;
-    top: 0;
-    left: 0;
-    width: 100vw;
-    height: 100vh;
-    background: #000000;
-    z-index: 9999;
-    display: none; /* Hidden by default */
-    flex-direction: column;
-    justify-content: flex-start;
-    align-items: center;
-    color: white;
-    touch-action: pan-y; /* Prevents pull-to-refresh or scrolling */
-	padding-top: 60px;
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  background: #000000;
+  z-index: 9999;
+  display: none;
+  flex-direction: column;
+  justify-content: flex-start;
+  align-items: center;
+  color: white;
+  touch-action: pan-y;
+  padding-top: 60px;
 }
 
 .unlock-slider {
-    -webkit-appearance: none;
-    width: 80%;
-	max-width: 300px;
-    height: 40px;
-    background: #333;
-    border-radius: 20px;
-    outline: none;
-	margin: 10px 0;
+  -webkit-appearance: none;
+  width: 80%;
+  max-width: 300px;
+  height: 40px;
+  background: #333;
+  border-radius: 20px;
+  outline: none;
+  margin: 10px 0;
 }
 
 .unlock-slider::-webkit-slider-thumb {
-    -webkit-appearance: none;
-    appearance: none;
-    width: 40px;
-    height: 40px;
-    border-radius: 50%;
-    background: #007bff;
-    cursor: pointer;
+  -webkit-appearance: none;
+  appearance: none;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: #007bff;
+  cursor: pointer;
 }
 
-body {
-    padding-bottom: 80px;
+/* Responsive Adjustments */
+@media (max-width: 380px) {
+  .settings-grid {
+    grid-template-columns: 1fr;
+  }
 }

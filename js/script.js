@@ -81,7 +81,7 @@ function handleGpsError(err) {
     // Error code 3 corresponds to TIMEOUT
     if (err.code === 3) {
         console.warn("High-accuracy GPS timed out after 60s. Falling back to lower accuracy.");
-        statusDiv.innerText = "Status: GPS timeout. Retrying with standard accuracy...";
+        statusDiv.innerText = "Status: GPS timeout. Retrying with standard accuracy";
         
         // Clear the failed high-accuracy watch
         if (watchId !== null) {
@@ -162,7 +162,7 @@ function handlePositionUpdate(pos) {
 	}
 
     if (trackingState === 'PRELOCKING') {
-        statusDiv.innerText = `Status: GPS Lock Active (±${Math.round(currentAccuracy)}m) - Ready to Start!`;
+        statusDiv.innerText = `Status: GPS Ready (±${Math.round(currentAccuracy)}m)`;
         return;
     }
 
@@ -236,7 +236,7 @@ function handlePositionUpdate(pos) {
     requiresNewSegment = false; 
     trackPoints.push(newPoint);
 	if (!isScreenLocked) {
-    statusDiv.innerText = `Status: Tracking... (${trackPoints.length} points)`;
+    statusDiv.innerText = `Status: Tracking (${trackPoints.length} points)`;
 	}
     
     if (trackPoints.length % 10 === 0) {
@@ -254,7 +254,7 @@ function lockGps() {
     }
 
     trackingState = 'PRELOCKING';
-    statusDiv.innerText = "Status: Warming up GPS radio...";
+    statusDiv.innerText = "Status: Acquiring GPS signal";
 
     watchId = navigator.geolocation.watchPosition(
         handlePositionUpdate,
@@ -287,7 +287,7 @@ async function startTracking() {
     }
 
     trackingState = 'TRACKING';
-    statusDiv.innerText = "Status: Tracking...";
+    statusDiv.innerText = "Status: Tracking";
 
     if (startBtn) startBtn.disabled = true;
     if (pauseBtn) pauseBtn.disabled = false;
@@ -312,7 +312,7 @@ function pauseTracking() {
     releaseWakeLock(); // Let screen turn off to save battery
 
     trackingState = 'PAUSED';
-    statusDiv.innerText = "Status: Paused (GPS Radio OFF)";
+    statusDiv.innerText = "Status: Paused";
     
     if (startBtn) {
         startBtn.innerText = "Resume Tracking";
@@ -329,7 +329,7 @@ function stopTracking() {
     
     releaseWakeLock();
 
-    statusDiv.innerText = "Status: Generating File...";
+    statusDiv.innerText = "Status: Generating File";
     accuracyDiv.innerText = "";
     
     if (startBtn) {
@@ -416,7 +416,7 @@ if (lockScreenBtn && touchLockOverlay && unlockSlider) {
             
             // Immediately update UI upon unlocking so it isn't blank/stale
             if (trackingState === 'TRACKING') {
-                statusDiv.innerText = `Status: Tracking... (${trackPoints.length} points)`;
+                statusDiv.innerText = `Status: Tracking (${trackPoints.length} points)`;
             }
         }
     });

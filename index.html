@@ -16,8 +16,6 @@
 			Refresh App
 		</button>
 	</div>
-
-    <h2>GPX Logger</h2>
     
     <div class="presets">
         <button id="btn-walk">🚶 Walk</button>
@@ -25,30 +23,49 @@
         <button id="btn-drive">🚗 Drive</button>
     </div>
     
-    <div class="settings-panel">
-        <label title="Ignore points with an error margin larger than this.">Max Accuracy Error (meters):</label>
-        <input type="number" id="set-accuracy" value="30">
+    <details class="settings-card">
+  <summary class="settings-header">
+    <span>Settings</span>
+    <span class="chevron">▼</span>
+  </summary>
 
-        <label title="Only log if you move at least this far.">Minimum Distance (meters):</label>
-        <input type="number" id="set-distance" value="5">
-
-        <label title="Force a log if this much time passes while moving, even if distance isn't met.">Max Time Between Logs (seconds):</label>
-        <input type="number" id="set-time" value="60">
-
-        <label title="Ignore points that require moving faster than this.">Max Speed Sanity Check (km/h):</label>
-		<input type="number" id="set-speed" value="100">
+  <div class="settings-grid">
+    <div class="setting-item">
+      <label for="set-accuracy" title="Ignore points with an error margin larger than this.">Max Accuracy (m)</label>
+      <input type="number" id="set-accuracy" value="30">
     </div>
 
+    <div class="setting-item">
+      <label for="set-distance" title="Only log if you move at least this far.">Min Distance (m)</label>
+      <input type="number" id="set-distance" value="5">
+    </div>
+
+    <div class="setting-item">
+      <label for="set-time" title="Force a log if this much time passes while moving, even if distance isn't met.">Max Time (s)</label>
+      <input type="number" id="set-time" value="60">
+    </div>
+
+    <div class="setting-item">
+      <label for="set-speed" title="Ignore points that require moving faster than this.">Max Speed (km/h)</label>
+      <input type="number" id="set-speed" value="100">
+    </div>
+  </div>
+</details>
+
+    <div class="tracker-card">
+  <div class="status-badge">
     <div id="status">Status: Idle</div>
     <div id="accuracy"></div>
-    
-    <button id="lockGpsBtn">Lock GPS Signal</button>
+  </div>
 
-	<div class="controls">
-		<button id="startBtn">Start Tracking</button>
-		<button id="pauseBtn" disabled>Pause Tracking</button>
-		<button id="stopBtn" disabled>Stop & Download</button>
-	</div>
+  <button id="lockGpsBtn" class="btn btn-secondary">Lock GPS Signal</button>
+
+  <div class="controls">
+    <button id="startBtn" class="btn btn-primary">Start Tracking</button>
+    <button id="pauseBtn" class="btn btn-warning" disabled>Pause Tracking</button>
+    <button id="stopBtn" class="btn btn-danger" disabled>Stop & Download</button>
+  </div>
+</div>
 
     <script src="js/script.js" defer></script>
 	
