@@ -8,6 +8,13 @@
   --border-color: #e2e8f0;
 }
 
+/* Disable text selection and callouts globally */
+* {
+  -webkit-touch-callout: none; /* Disables iOS/Android callout menu on long-press */
+  -webkit-user-select: none;   /* Disables text selection highlighting */
+  user-select: none;          
+}
+
 /* Base Body Styles */
 body { 
   font-family: system-ui, -apple-system, sans-serif; 

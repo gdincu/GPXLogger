@@ -441,6 +441,11 @@ if (btnBike) btnBike.addEventListener('click', () => applyPresets(40, 5, 60, 90,
 // Drive: Filter largely bypassed by speed gate, but fallback value included.
 if (btnDrive) btnDrive.addEventListener('click', () => applyPresets(50, 15, 120, 180, 0.0001));
 
+// Block context menu event triggered by long-press or right-click
+window.addEventListener('contextmenu', function (event) {
+    event.preventDefault();
+});
+
 window.addEventListener('beforeunload', (e) => {
     if (watchId !== null) {
         e.preventDefault();
