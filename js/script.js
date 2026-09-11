@@ -199,7 +199,12 @@ function handlePositionUpdate(pos) {
         kalmanLat.x = finalLat;
         kalmanLon.x = finalLon;
     } else {
-        // If walking or stopped, apply the fixed Kalman filter to eliminate stationary drift
+        // If walking or stopped, apply dynamic Kalman filter based on current accuracy
+        const smoothingFactor = window.kalmanMultiplier || 0.1;
+        const dynamicQ = accuracyDeg * smoothingFactor;
+        kalmanLat.setProcessNoise(dynamicQ);
+        kalmanLon.setProcessNoise(dynamicQ);
+
         finalLat = kalmanLat.filter(pos.coords.latitude, accuracyDeg);
         finalLon = kalmanLon.filter(pos.coords.longitude, accuracyDeg);
     }
@@ -384,15 +389,12 @@ function generateGPXFile() {
     statusDiv.innerText = "Status: Downloaded!";
 }
 
-function applyPresets(accuracy, distance, time, speed, processNoise) {
+function applyPresets(accuracy, distance, time, speed, smoothingMultiplier) {
     inputMaxAccuracy.value = accuracy;
     inputMinDistance.value = distance;
     inputMaxTime.value = time;
     inputMaxSpeed.value = speed;
-
-    // Dynamically adjust how aggressively the filter smooths
-    kalmanLat.setProcessNoise(processNoise);
-    kalmanLon.setProcessNoise(processNoise);
+    window.kalmanMultiplier = smoothingMultiplier;
 }
 
 // Screen Lock Logic / Unlock Logic
@@ -434,14 +436,14 @@ if (startBtn) startBtn.addEventListener('click', startTracking);
 if (pauseBtn) pauseBtn.addEventListener('click', pauseTracking);
 if (stopBtn) stopBtn.addEventListener('click', stopTracking);
 
-// Walk: Erratic movement, slower. High smoothing needed. (q = 0.00001)
-if (btnWalk) btnWalk.addEventListener('click', () => applyPresets(30, 5, 60, 15, 0.00001));
+// Walk: Erratic movement, slower. High smoothing needed. (multiplier = 0.02)
+if (btnWalk) btnWalk.addEventListener('click', () => applyPresets(30, 5, 60, 15, 0.02));
 
-// Bike: Faster, smoother curves. Moderate smoothing. (q = 0.00005)
-if (btnBike) btnBike.addEventListener('click', () => applyPresets(40, 5, 60, 90, 0.00005));
+// Bike: Faster, smoother curves. Moderate smoothing. (multiplier = 0.10)
+if (btnBike) btnBike.addEventListener('click', () => applyPresets(40, 5, 60, 90, 0.10));
 
-// Drive: Mostly bypassed by the 12km/h speed gate anyway, but scaled properly. (q = 0.0001)
-if (btnDrive) btnDrive.addEventListener('click', () => applyPresets(50, 15, 120, 180, 0.0001));
+// Drive: Mostly bypassed by the 12km/h speed gate anyway, but scaled properly. (multiplier = 0.50)
+if (btnDrive) btnDrive.addEventListener('click', () => applyPresets(50, 15, 120, 180, 0.50));
 
 
 // Block context menu event triggered by long-press or right-click
