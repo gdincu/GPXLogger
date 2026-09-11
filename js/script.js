@@ -434,12 +434,15 @@ if (startBtn) startBtn.addEventListener('click', startTracking);
 if (pauseBtn) pauseBtn.addEventListener('click', pauseTracking);
 if (stopBtn) stopBtn.addEventListener('click', stopTracking);
 
-// Walk: Erratic movement, quick turns. (q = 0.001)
-if (btnWalk) btnWalk.addEventListener('click', () => applyPresets(30, 5, 60, 15, 0.001));
-// Bike: Faster, smoother curves. (q = 0.0005)
-if (btnBike) btnBike.addEventListener('click', () => applyPresets(40, 5, 60, 90, 0.0005));
-// Drive: Filter largely bypassed by speed gate, but fallback value included.
+// Walk: Erratic movement, slower. High smoothing needed. (q = 0.00001)
+if (btnWalk) btnWalk.addEventListener('click', () => applyPresets(30, 5, 60, 15, 0.00001));
+
+// Bike: Faster, smoother curves. Moderate smoothing. (q = 0.00005)
+if (btnBike) btnBike.addEventListener('click', () => applyPresets(40, 5, 60, 90, 0.00005));
+
+// Drive: Mostly bypassed by the 12km/h speed gate anyway, but scaled properly. (q = 0.0001)
 if (btnDrive) btnDrive.addEventListener('click', () => applyPresets(50, 15, 120, 180, 0.0001));
+
 
 // Block context menu event triggered by long-press or right-click
 window.addEventListener('contextmenu', function (event) {
