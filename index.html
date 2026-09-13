@@ -3,16 +3,22 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Battery-efficient offline GPS logger that records tracks and exports GPX files, 100% client-side.">
+    <meta name="theme-color" content="#2563eb">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
     <title>GPX Logger</title>
 	<link rel="manifest" href="manifest.json">
     <link rel="stylesheet" href="css/style.css">
 	<link rel="icon" type="image/png" href="icon-192.png">
+	<link rel="apple-touch-icon" href="icon-192.png">
 </head>
 <body>
 
-	<div id="updateBanner" style="display: none; background: #28a745; color: white; padding: 12px; text-align: center; position: fixed; top: 0; left: 0; right: 0; z-index: 10000; box-shadow: 0 2px 5px rgba(0,0,0,0.3);">
+	<div id="updateBanner" class="update-banner" hidden>
 		New version available! 
-		<button id="updateBtn" style="margin-left: 15px; padding: 6px 12px; background: white; color: #28a745; border: none; border-radius: 4px; font-weight: bold; cursor: pointer;">
+		<button id="updateBtn" class="update-btn">
 			Refresh App
 		</button>
 	</div>
@@ -26,35 +32,35 @@
     <details class="settings-card">
   <summary class="settings-header">
     <span>Settings</span>
-    <span class="chevron">▼</span>
+    <span class="chevron" aria-hidden="true">▼</span>
   </summary>
 
   <div class="settings-grid">
     <div class="setting-item">
       <label for="set-accuracy" title="Ignore points with an error margin larger than this.">Max Accuracy (m)</label>
-      <input type="number" id="set-accuracy" value="30">
+      <input type="number" id="set-accuracy" value="30" min="1" max="1000">
     </div>
 
     <div class="setting-item">
       <label for="set-distance" title="Only log if you move at least this far.">Min Distance (m)</label>
-      <input type="number" id="set-distance" value="5">
+      <input type="number" id="set-distance" value="5" min="0" max="1000">
     </div>
 
     <div class="setting-item">
       <label for="set-time" title="Force a log if this much time passes while moving, even if distance isn't met.">Max Time (s)</label>
-      <input type="number" id="set-time" value="60">
+      <input type="number" id="set-time" value="60" min="1" max="3600">
     </div>
 
     <div class="setting-item">
       <label for="set-speed" title="Ignore points that require moving faster than this.">Max Speed (km/h)</label>
-      <input type="number" id="set-speed" value="100">
+      <input type="number" id="set-speed" value="100" min="1" max="1000">
     </div>
   </div>
 </details>
 
     <div class="tracker-card">
   <div class="status-badge">
-    <div id="status">Status: Idle</div>
+    <div id="status" role="status" aria-live="polite">Status: Idle</div>
     <div id="accuracy"></div>
   </div>
 
@@ -67,31 +73,16 @@
   </div>
 </div>
 
+    <noscript><p>This app requires JavaScript to log GPS tracks.</p></noscript>
     <script src="js/script.js" defer></script>
 	
-	<button id="lockScreenBtn" style="
-        position: fixed; 
-        bottom: 20px; 
-        left: 50%; 
-        transform: translateX(-50%); 
-        width: 90%; 
-        max-width: 400px; 
-        padding: 15px; 
-        border: none; 
-        border-radius: 8px; 
-        font-weight: bold; 
-        font-size: 16px; 
-        cursor: pointer; 
-        background-color: #ff9800; 
-        color: white; 
-        z-index: 1000; 
-        box-shadow: 0 4px 10px rgba(0,0,0,0.3);">
+	<button id="lockScreenBtn" class="lock-screen-btn">
         Lock Screen
     </button>
 	
 	<div id="touchLockOverlay" class="touch-lock-overlay">
-        <input type="range" id="unlockSlider" min="0" max="100" value="0" class="unlock-slider">
-        <div style="font-size: 12px; color: #ccc;">Slide to unlock</div>
+        <label for="unlockSlider" class="unlock-label">Slide to unlock</label>
+        <input type="range" id="unlockSlider" min="0" max="100" value="0" class="unlock-slider" aria-label="Slide to unlock">
     </div>
 </body>
 </html>

@@ -8,11 +8,18 @@
   --border-color: #e2e8f0;
 }
 
-/* Disable text selection and callouts globally */
+/* Disable text selection and callouts globally, but keep inputs editable */
 * {
   -webkit-touch-callout: none; /* Disables iOS/Android callout menu on long-press */
   -webkit-user-select: none;   /* Disables text selection highlighting */
-  user-select: none;          
+  user-select: none;
+}
+
+input,
+textarea {
+  -webkit-touch-callout: default;
+  -webkit-user-select: text;
+  user-select: text;
 }
 
 /* Base Body Styles */
@@ -24,6 +31,35 @@ body {
   text-align: center; 
   overscroll-behavior-y: contain;
   background-color: var(--bg-color);
+}
+
+/* Update banner (moved from inline styles) */
+.update-banner {
+  background: #28a745;
+  color: white;
+  padding: 12px;
+  text-align: center;
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 10000;
+  box-shadow: 0 2px 5px rgba(0,0,0,0.3);
+}
+
+.update-banner[hidden] {
+  display: none;
+}
+
+.update-btn {
+  margin-left: 15px;
+  padding: 6px 12px;
+  background: white;
+  color: #28a745;
+  border: none;
+  border-radius: 4px;
+  font-weight: bold;
+  cursor: pointer;
 }
 
 /* Card Layout Container */
@@ -86,7 +122,12 @@ button {
   cursor: pointer; 
   border: none;
   border-radius: 6px;
-  transition: all 0.2s ease;
+  transition: background-color 0.2s ease;
+}
+
+button:focus-visible {
+  outline: 2px solid var(--primary-color);
+  outline-offset: 2px;
 }
 
 /* Button Color Variants */
@@ -125,6 +166,26 @@ button:disabled {
   opacity: 0.4;
   cursor: not-allowed;
   filter: grayscale(80%);
+}
+
+/* Fixed Lock Screen button (moved from inline styles) */
+.lock-screen-btn {
+  position: fixed;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 90%;
+  max-width: 400px;
+  padding: 15px;
+  border: none;
+  border-radius: 8px;
+  font-weight: bold;
+  font-size: 16px;
+  cursor: pointer;
+  background-color: #ff9800;
+  color: white;
+  z-index: 1000;
+  box-shadow: 0 4px 10px rgba(0,0,0,0.3);
 }
 
 /* Settings Card */
@@ -220,12 +281,19 @@ button:disabled {
   justify-content: flex-start;
   align-items: center;
   color: white;
-  touch-action: pan-y;
+  touch-action: none;
   padding-top: 60px;
+}
+
+.unlock-label {
+  font-size: 12px;
+  color: #ccc;
+  order: 2;
 }
 
 .unlock-slider {
   -webkit-appearance: none;
+  appearance: none;
   width: 80%;
   max-width: 300px;
   height: 40px;
@@ -243,11 +311,37 @@ button:disabled {
   border-radius: 50%;
   background: #007bff;
   cursor: pointer;
+  border: none;
+}
+
+.unlock-slider::-moz-range-track {
+  width: 100%;
+  height: 40px;
+  background: #333;
+  border-radius: 20px;
+  border: none;
+}
+
+.unlock-slider::-moz-range-thumb {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: #007bff;
+  cursor: pointer;
+  border: none;
 }
 
 /* Responsive Adjustments */
 @media (max-width: 380px) {
   .settings-grid {
     grid-template-columns: 1fr;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition: none !important;
   }
 }

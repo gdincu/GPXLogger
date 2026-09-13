@@ -1,3 +1,16 @@
+// --- Constants ---
+const GEO_HIGH_ACCURACY = { enableHighAccuracy: true, maximumAge: 0, timeout: 60000 };
+const GEO_FALLBACK = { enableHighAccuracy: false, maximumAge: 0, timeout: 30000 };
+const SIGNAL_DROPOUT_MS = 45000; // New trkseg after this gap (tunnels)
+const KALMAN_BYPASS_KMH = 12; // Above this, raw GPS hugs curves (no smoothing)
+const STATIONARY_FREEZE_KMH = 1.5; // Below this, freeze logging (Doppler drift fix)
+const FALLBACK_MAX_ACCURACY_M = 500; // Relaxed filter when on cell/Wi-Fi fallback
+const UNLOCK_THRESHOLD = 95;
+const ELE_SMOOTHING_WINDOW = 5;
+const BACKUP_EVERY_N = 10;
+const METERS_PER_DEGREE_LAT = 111320;
+const BACKUP_KEY = 'gpx_backup';
+
 // --- Application State ---
 let watchId = null;
 let trackPoints = [];
@@ -5,6 +18,7 @@ let wakeLock = null;
 let rawElevations = []; // Used for moving average smoothing
 let lastPingTime = 0; // Tracks signal dropouts
 let isScreenLocked = false;
+let kalmanMultiplier = 0.1; // Default (bike); changed by presets
 
 // Tracking States: 'IDLE' | 'PRELOCKING' | 'TRACKING' | 'PAUSED'
 let trackingState = 'IDLE'; 
@@ -27,6 +41,37 @@ const inputMaxSpeed = document.getElementById('set-speed');
 const btnWalk = document.getElementById('btn-walk');
 const btnBike = document.getElementById('btn-bike');
 const btnDrive = document.getElementById('btn-drive');
+
+// --- UI helpers (single place for status/button changes) ---
+function setStatus(text) {
+    if (statusDiv) statusDiv.innerText = text;
+}
+
+function setAccuracyText(text) {
+    if (accuracyDiv && !isScreenLocked) accuracyDiv.innerText = text;
+}
+
+function updateControlState() {
+    const watching = watchId !== null;
+    const tracking = trackingState === 'TRACKING';
+    const paused = trackingState === 'PAUSED';
+    if (lockGpsBtn) lockGpsBtn.disabled = watching || tracking;
+    if (startBtn) startBtn.disabled = tracking;
+    if (pauseBtn) pauseBtn.disabled = !tracking;
+    if (stopBtn) stopBtn.disabled = !(tracking || (paused && trackPoints.length > 0));
+}
+
+function resetControlsToIdle(statusText) {
+    trackingState = 'IDLE';
+    if (startBtn) {
+        startBtn.innerText = 'Start Tracking';
+        startBtn.disabled = false;
+    }
+    if (pauseBtn) pauseBtn.disabled = true;
+    if (stopBtn) stopBtn.disabled = true;
+    if (lockGpsBtn) lockGpsBtn.disabled = watchId !== null;
+    if (statusText) setStatus(statusText);
+}
 
 // --- Helper Classes & Functions ---
 class SimpleKalman {
@@ -77,17 +122,21 @@ function getDistance(lat1, lon1, lat2, lon2) {
     return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
 }
 
+function stopWatch() {
+    if (watchId !== null) {
+        navigator.geolocation.clearWatch(watchId);
+        watchId = null;
+    }
+}
+
 function handleGpsError(err) {
     // Error code 3 corresponds to TIMEOUT
     if (err.code === 3) {
-        console.warn("High-accuracy GPS timed out after 60s. Falling back to lower accuracy.");
-        statusDiv.innerText = "Status: GPS timeout. Retrying with standard accuracy";
+        console.warn('High-accuracy GPS timed out. Falling back to lower accuracy.');
+        setStatus('Status: GPS timeout. Retrying with standard accuracy');
         
         // Clear the failed high-accuracy watch
-        if (watchId !== null) {
-            navigator.geolocation.clearWatch(watchId);
-            watchId = null;
-        }
+        stopWatch();
 		
 		isUsingFallback = true;
 
@@ -95,56 +144,93 @@ function handleGpsError(err) {
         watchId = navigator.geolocation.watchPosition(
             handlePositionUpdate,
             (fallbackErr) => {
-                alert(`GPS Error: ${fallbackErr.message}`);
-                statusDiv.innerText = "Status: GPS Error";
+                setStatus(`Status: GPS Error (${fallbackErr.message})`);
             },
-            { enableHighAccuracy: false, maximumAge: 0, timeout: 30000 }
+            GEO_FALLBACK
         );
+        updateControlState();
+    } else if (err.code === 1) {
+        // PERMISSION_DENIED: stuck UI is worse than an error, so reset.
+        stopWatch();
+        releaseWakeLock();
+        resetControlsToIdle(`Status: GPS permission denied`);
     } else {
-        // Handle other errors (e.g., PERMISSION_DENIED = 1, POSITION_UNAVAILABLE = 2)
-        alert(`GPS Error: ${err.message}`);
-        statusDiv.innerText = `Status: Error (${err.message})`;
+        // POSITION_UNAVAILABLE etc: non-blocking, keep watching for recovery.
+        setStatus(`Status: GPS Error (${err.message})`);
     }
 }
 
 function getSmoothedElevation(newEle) {
-    if (newEle === null) return 0;
+    if (newEle === null || newEle === undefined || !Number.isFinite(newEle)) {
+        if (rawElevations.length === 0) return 0;
+        const sum = rawElevations.reduce((a, b) => a + b, 0);
+        return sum / rawElevations.length;
+    }
     rawElevations.push(newEle);
-    if (rawElevations.length > 5) rawElevations.shift(); // Keep last 5 points
+    if (rawElevations.length > ELE_SMOOTHING_WINDOW) rawElevations.shift(); // Keep last N points
     const sum = rawElevations.reduce((a, b) => a + b, 0);
     return sum / rawElevations.length;
 }
 
+function saveBackup() {
+    try {
+        localStorage.setItem(BACKUP_KEY, JSON.stringify(trackPoints));
+    } catch (err) {
+        console.warn('Could not save backup (quota?):', err);
+    }
+}
+
 // --- Wake Lock Helpers ---
 async function requestWakeLock() {
-    if ('wakeLock' in navigator && wakeLock === null) {
-        try {
-            wakeLock = await navigator.wakeLock.request('screen');
-        } catch (err) {
-            console.error("Wake lock failed:", err);
-        }
+    if (!('wakeLock' in navigator)) return;
+    if (wakeLock !== null) return;
+    try {
+        wakeLock = await navigator.wakeLock.request('screen');
+        wakeLock.addEventListener('release', () => {
+            wakeLock = null;
+        });
+    } catch (err) {
+        console.error('Wake lock failed:', err);
+        wakeLock = null;
     }
 }
 
 function releaseWakeLock() {
     if (wakeLock !== null) {
-        wakeLock.release().then(() => wakeLock = null);
+        const lock = wakeLock;
+        wakeLock = null;
+        lock.release().catch((err) => console.warn('Wake lock release failed:', err));
     }
 }
 
 // --- Lifecycle Functions ---
-window.onload = () => {
-    const backup = localStorage.getItem('gpx_backup');
-    if (backup) {
-        const recoveredPoints = JSON.parse(backup);
-        if (recoveredPoints.length > 0 && confirm(`Found ${recoveredPoints.length} unsaved points. Download them now?`)) {
-            trackPoints = recoveredPoints;
-            generateGPXFile();
-        } else {
-            localStorage.removeItem('gpx_backup');
-        }
+window.addEventListener('load', () => {
+    let backup = null;
+    try {
+        backup = localStorage.getItem(BACKUP_KEY);
+    } catch (err) {
+        console.warn('Could not read backup:', err);
+        return;
     }
-};
+    if (!backup) return;
+    let recoveredPoints = null;
+    try {
+        recoveredPoints = JSON.parse(backup);
+    } catch (err) {
+        console.warn('Corrupt backup, discarding:', err);
+        try { localStorage.removeItem(BACKUP_KEY); } catch { /* ignore */ }
+        return;
+    }
+    if (!Array.isArray(recoveredPoints) || recoveredPoints.length === 0) {
+        try { localStorage.removeItem(BACKUP_KEY); } catch { /* ignore */ }
+        return;
+    }
+    if (confirm(`Found ${recoveredPoints.length} unsaved points. Download them now?`)) {
+        trackPoints = recoveredPoints;
+        generateGPXFile();
+    }
+    // If declined: keep the backup so no data is lost. It will prompt again next load.
+});
 
 document.addEventListener('visibilitychange', async () => {
     // Only re-acquire wake lock if we are actively tracking
@@ -157,41 +243,40 @@ document.addEventListener('visibilitychange', async () => {
 function handlePositionUpdate(pos) {
     const currentAccuracy = pos.coords.accuracy;
 	
-	if (!isScreenLocked) {
-    accuracyDiv.innerText = `Current Accuracy: ±${Math.round(currentAccuracy)}m`;
-	}
+    setAccuracyText(`Current Accuracy: ±${Math.round(currentAccuracy)}m`);
 
     if (trackingState === 'PRELOCKING') {
-        statusDiv.innerText = `Status: GPS Ready (±${Math.round(currentAccuracy)}m)`;
+        setStatus(`Status: GPS Ready (±${Math.round(currentAccuracy)}m)`);
         return;
     }
 
-    const maxAcc = isUsingFallback ? 500 : (parseFloat(inputMaxAccuracy.value) || 30);
+    if (trackingState !== 'TRACKING') return;
+
+    const maxAcc = isUsingFallback ? FALLBACK_MAX_ACCURACY_M : (parseFloat(inputMaxAccuracy.value) || 30);
     const minDist = parseFloat(inputMinDistance.value) || 5;
     const maxTimeMs = (parseFloat(inputMaxTime.value) || 60) * 1000;
-    const maxSpeed = parseFloat(inputMaxSpeed.value) || 30;
+    const maxSpeed = parseFloat(inputMaxSpeed.value) || 100;
 
     if (currentAccuracy > maxAcc) return;
 
     const nowMs = pos.timestamp;
     let isNewSegment = requiresNewSegment;
 
-    if (lastPingTime > 0 && (nowMs - lastPingTime > 45000)) {
+    if (lastPingTime > 0 && (nowMs - lastPingTime > SIGNAL_DROPOUT_MS)) {
         kalmanLat.reset();
         kalmanLon.reset();
         isNewSegment = true; 
     }
     lastPingTime = nowMs;
 
-    // --- THE FIX: Unit Conversion & Speed Gating ---
-    // 1 degree of latitude is roughly 111,320 meters. We must convert accuracy to degrees for the math to work.
-    const accuracyDeg = currentAccuracy / 111320;
+    // 1 degree of latitude is roughly 111,320 meters. Convert accuracy to degrees for the filter.
+    const accuracyDeg = currentAccuracy / METERS_PER_DEGREE_LAT;
     const nativeSpeedKmh = (pos.coords.speed || 0) * 3.6;
     
     let finalLat, finalLon;
 
-    // If moving faster than 12 km/h (driving/fast cycling), bypass the filter to prevent corner-cutting
-    if (nativeSpeedKmh > 12) {
+    // If moving fast (driving/fast cycling), bypass the filter to prevent corner-cutting
+    if (nativeSpeedKmh > KALMAN_BYPASS_KMH) {
         finalLat = pos.coords.latitude;
         finalLon = pos.coords.longitude;
         
@@ -200,8 +285,7 @@ function handlePositionUpdate(pos) {
         kalmanLon.x = finalLon;
     } else {
         // If walking or stopped, apply dynamic Kalman filter based on current accuracy
-        const smoothingFactor = window.kalmanMultiplier || 0.1;
-        const dynamicQ = accuracyDeg * smoothingFactor;
+        const dynamicQ = accuracyDeg * kalmanMultiplier;
         kalmanLat.setProcessNoise(dynamicQ);
         kalmanLon.setProcessNoise(dynamicQ);
 
@@ -226,10 +310,15 @@ function handlePositionUpdate(pos) {
         const lastPoint = trackPoints[trackPoints.length - 1];
         const distance = getDistance(lastPoint.lat, lastPoint.lon, newPoint.lat, newPoint.lon);
         const timeDiff = newPoint.timestamp - lastPoint.timestamp;
+        if (!Number.isFinite(timeDiff) || timeDiff <= 0) return;
         const calculatedSpeedKmh = (distance / (timeDiff / 1000)) * 3.6;
 
         if (calculatedSpeedKmh > maxSpeed) return;
-        if (pos.coords.speed !== null && nativeSpeedKmh < 1.5) return; 
+        // Freeze when standing still. Fall back to calculated speed when the
+        // device reports no native Doppler speed (null), for consistent behavior.
+        const hasNativeSpeed = pos.coords.speed !== null && pos.coords.speed !== undefined;
+        const effectiveStoppedSpeed = hasNativeSpeed ? nativeSpeedKmh : calculatedSpeedKmh;
+        if (effectiveStoppedSpeed < STATIONARY_FREEZE_KMH) return; 
 
         const dynamicMinDist = Math.max(minDist, (lastPoint.accuracy + currentAccuracy) * 0.5);
         const movedEnough = distance >= dynamicMinDist;
@@ -241,11 +330,11 @@ function handlePositionUpdate(pos) {
     requiresNewSegment = false; 
     trackPoints.push(newPoint);
 	if (!isScreenLocked) {
-    statusDiv.innerText = `Status: Tracking (${trackPoints.length} points)`;
+        setStatus(`Status: Tracking (${trackPoints.length} points)`);
 	}
     
-    if (trackPoints.length % 10 === 0) {
-        localStorage.setItem('gpx_backup', JSON.stringify(trackPoints));
+    if (trackPoints.length % BACKUP_EVERY_N === 0) {
+        saveBackup();
     }
 }
 
@@ -254,23 +343,24 @@ function lockGps() {
     if (watchId !== null) return; // Already watching
 
     if (!navigator.geolocation) {
-        alert("Geolocation not supported");
+        setStatus('Status: Geolocation not supported');
         return;
     }
 
     trackingState = 'PRELOCKING';
-    statusDiv.innerText = "Status: Acquiring GPS signal";
+    setStatus('Status: Acquiring GPS signal');
 
     watchId = navigator.geolocation.watchPosition(
         handlePositionUpdate,
         handleGpsError,
-        { enableHighAccuracy: true, maximumAge: 0, timeout: 60000 }
+        GEO_HIGH_ACCURACY
     );
+    updateControlState();
 }
 
 async function startTracking() {
     if (!navigator.geolocation) {
-        alert("Geolocation not supported");
+        setStatus('Status: Geolocation not supported');
         return;
     }
 
@@ -292,53 +382,45 @@ async function startTracking() {
     }
 
     trackingState = 'TRACKING';
-    statusDiv.innerText = "Status: Tracking";
-
-    if (startBtn) startBtn.disabled = true;
-    if (pauseBtn) pauseBtn.disabled = false;
-    if (stopBtn) stopBtn.disabled = false;
+    setStatus('Status: Tracking');
 
     // Start the watch if it wasn't already started by lockGps()
     if (watchId === null) {
         watchId = navigator.geolocation.watchPosition(
             handlePositionUpdate,
             handleGpsError,
-            { enableHighAccuracy: true, maximumAge: 0, timeout: 60000 }
+            GEO_HIGH_ACCURACY
         );
     }
+    updateControlState();
 }
 
 function pauseTracking() {
-    if (watchId !== null) {
-        navigator.geolocation.clearWatch(watchId);
-        watchId = null;
-    }
+    stopWatch();
 
     releaseWakeLock(); // Let screen turn off to save battery
 
     trackingState = 'PAUSED';
-    statusDiv.innerText = "Status: Paused";
+    setStatus('Status: Paused');
     
     if (startBtn) {
-        startBtn.innerText = "Resume Tracking";
+        startBtn.innerText = 'Resume Tracking';
         startBtn.disabled = false;
     }
-    if (pauseBtn) pauseBtn.disabled = true;
+    updateControlState();
+    if (startBtn) startBtn.disabled = false; // Resume must stay enabled
 }
 
 function stopTracking() {
-    if (watchId !== null) {
-        navigator.geolocation.clearWatch(watchId);
-        watchId = null;
-    }
+    stopWatch();
     
     releaseWakeLock();
 
-    statusDiv.innerText = "Status: Generating File";
-    accuracyDiv.innerText = "";
+    setStatus('Status: Generating File');
+    if (accuracyDiv) accuracyDiv.innerText = '';
     
     if (startBtn) {
-        startBtn.innerText = "Start Tracking";
+        startBtn.innerText = 'Start Tracking';
         startBtn.disabled = false;
     }
     if (pauseBtn) pauseBtn.disabled = true;
@@ -346,25 +428,26 @@ function stopTracking() {
 
     trackingState = 'IDLE';
     generateGPXFile();
+    updateControlState();
+    if (startBtn) {
+        startBtn.innerText = 'Start Tracking';
+        startBtn.disabled = false;
+    }
 }
 
 function generateGPXFile() {
-    // Save any remaining points that didn't hit the modulo 10 check
-    if (trackPoints.length > 0) {
-        localStorage.setItem('gpx_backup', JSON.stringify(trackPoints));
-    }
-
     if (trackPoints.length === 0) {
-        alert("No accurate points were logged.");
-        statusDiv.innerText = "Status: Idle";
+        setStatus('Status: Idle');
         return;
     }
 
-    const header = `<?xml version="1.0" encoding="UTF-8"?><gpx version="1.1" creator="WebGPX"><trk><trkseg>\n`;
+    const nowIso = new Date().toISOString();
+    const header = `<?xml version="1.0" encoding="UTF-8"?>\n<gpx version="1.1" creator="GPXLogger" xmlns="http://www.topografix.com/GPX/1/1">\n<trk>\n<name>Track ${nowIso.slice(0, 10)}</name>\n<time>${nowIso}</time>\n<trkseg>\n`;
     
     // Build GPX, mapping altitude to 1 decimal place and splitting segments on dropouts
     const body = trackPoints.map((p, index) => {
-        let ptXml = `  <trkpt lat="${p.lat}" lon="${p.lon}">\n    <ele>${p.ele.toFixed(1)}</ele>\n    <time>${p.time}</time>\n  </trkpt>`;
+        const ele = Number.isFinite(p.ele) ? p.ele.toFixed(1) : '0.0';
+        let ptXml = `  <trkpt lat="${p.lat}" lon="${p.lon}">\n    <ele>${ele}</ele>\n    <time>${p.time}</time>\n  </trkpt>`;
         
         // Break GPX line on tunnel reconnections/dropouts or pauses
         if (p.isNewSegment && index > 0) {
@@ -373,20 +456,25 @@ function generateGPXFile() {
         return ptXml;
     }).join('\n');
     
-    const footer = `\n</trkseg></trk></gpx>`;
+    const footer = `\n</trkseg>\n</trk>\n</gpx>`;
     
     const finalGpx = header + body + footer;
 
+    const blob = new Blob([finalGpx], {type: 'application/gpx+xml'});
+    const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
-    a.href = URL.createObjectURL(new Blob([finalGpx], {type: 'application/gpx+xml'}));
-    a.download = `track_${new Date().toISOString().slice(0,10)}.gpx`;
+    a.href = url;
+    a.download = `track_${nowIso.slice(0,10)}.gpx`;
+    document.body.appendChild(a);
     a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
     
-    localStorage.removeItem('gpx_backup');
+    try { localStorage.removeItem(BACKUP_KEY); } catch { /* ignore */ }
     trackPoints = [];
     rawElevations = [];
     
-    statusDiv.innerText = "Status: Downloaded!";
+    setStatus('Status: Downloaded!');
 }
 
 function applyPresets(accuracy, distance, time, speed, smoothingMultiplier) {
@@ -394,7 +482,7 @@ function applyPresets(accuracy, distance, time, speed, smoothingMultiplier) {
     inputMinDistance.value = distance;
     inputMaxTime.value = time;
     inputMaxSpeed.value = speed;
-    window.kalmanMultiplier = smoothingMultiplier;
+    kalmanMultiplier = smoothingMultiplier;
 }
 
 // Screen Lock Logic / Unlock Logic
@@ -403,7 +491,9 @@ const touchLockOverlay = document.getElementById('touchLockOverlay');
 const unlockSlider = document.getElementById('unlockSlider');
 
 if (lockScreenBtn && touchLockOverlay && unlockSlider) {
-    lockScreenBtn.addEventListener('click', () => {
+    lockScreenBtn.addEventListener('click', async () => {
+        // Keep the CPU awake while the OLED-black overlay is shown.
+        await requestWakeLock();
         touchLockOverlay.style.display = 'flex';
         unlockSlider.value = 0; // Reset slider position
 		isScreenLocked = true;
@@ -411,22 +501,27 @@ if (lockScreenBtn && touchLockOverlay && unlockSlider) {
 
     // Continuously check the slider value as the user drags it
     unlockSlider.addEventListener('input', (e) => {
-        if (e.target.value >= 95) { 
+        if (Number(e.target.value) >= UNLOCK_THRESHOLD) { 
             touchLockOverlay.style.display = 'none'; 
             e.target.value = 0; 
             isScreenLocked = false; // RESUME DOM UPDATES
             
             // Immediately update UI upon unlocking so it isn't blank/stale
             if (trackingState === 'TRACKING') {
-                statusDiv.innerText = `Status: Tracking (${trackPoints.length} points)`;
+                setStatus(`Status: Tracking (${trackPoints.length} points)`);
             }
         }
     });
 
     unlockSlider.addEventListener('change', (e) => {
-        if (e.target.value < 95) {
+        if (Number(e.target.value) < UNLOCK_THRESHOLD) {
             e.target.value = 0;
         }
+    });
+
+    // Only suppress the long-press menu on the lock overlay itself.
+    touchLockOverlay.addEventListener('contextmenu', (event) => {
+        event.preventDefault();
     });
 }
 
@@ -442,17 +537,12 @@ if (btnWalk) btnWalk.addEventListener('click', () => applyPresets(30, 5, 60, 15,
 // Bike: Faster, smoother curves. Moderate smoothing. (multiplier = 0.10)
 if (btnBike) btnBike.addEventListener('click', () => applyPresets(40, 5, 60, 90, 0.10));
 
-// Drive: Mostly bypassed by the 12km/h speed gate anyway, but scaled properly. (multiplier = 0.50)
+// Drive: Mostly bypassed by the speed gate anyway, but scaled properly. (multiplier = 0.50)
 if (btnDrive) btnDrive.addEventListener('click', () => applyPresets(50, 15, 120, 180, 0.50));
 
 
-// Block context menu event triggered by long-press or right-click
-window.addEventListener('contextmenu', function (event) {
-    event.preventDefault();
-});
-
 window.addEventListener('beforeunload', (e) => {
-    if (watchId !== null) {
+    if (trackingState === 'TRACKING' && trackPoints.length > 0) {
         e.preventDefault();
         e.returnValue = ''; // Standard for modern browsers to trigger the confirmation dialog
     }
@@ -467,15 +557,16 @@ if ('serviceWorker' in navigator) {
     window.addEventListener('load', () => {
         navigator.serviceWorker.register('./sw.js')
             .then(reg => {
-                console.log('ServiceWorker registered:', reg.scope);
-                
                 // Check for updates whenever the page loads
                 reg.addEventListener('updatefound', () => {
                     newWorker = reg.installing;
                     newWorker.addEventListener('statechange', () => {
                         // If the new worker is ready AND an old worker exists, show the prompt
                         if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
-                            updateBanner.style.display = 'block';
+                            if (updateBanner) {
+                                updateBanner.hidden = false;
+                                updateBanner.style.display = 'block';
+                            }
                         }
                     });
                 });
